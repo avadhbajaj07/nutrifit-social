@@ -1,53 +1,40 @@
 import express from 'express';
+import { getClientProductsList } from '../services/clientProductsService.js';
 import { getLocalMediaList } from '../services/localMediaService.js';
-import { NUTRIFITNESS_PRODUCTS } from '../services/nutrifitnessProducts.js';
 import { fetchCloudinaryMedia, deleteMediaFromCloudinary } from '../services/cloudinaryService.js';
 
 const router = express.Router();
 
-// Get real NutriFitness.ch store products
+// Get real client products from /products folder
 router.get('/products', (req, res) => {
   try {
+    const products = getClientProductsList();
     res.json({
       success: true,
-      count: NUTRIFITNESS_PRODUCTS.length,
-      products: NUTRIFITNESS_PRODUCTS
+      count: products.length,
+      products
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get all media (local inspiration + store products + Cloudinary)
+// Get all media (products prioritized)
 router.get('/', async (req, res) => {
   try {
+    const products = getClientProductsList();
     const localMedia = getLocalMediaList();
-    
-    // Map products to media format
-    const productMedia = NUTRIFITNESS_PRODUCTS.map(p => ({
-      public_id: p.id,
-      secure_url: p.url,
-      title: p.title,
-      category: p.category,
-      description: p.description,
-      aspect_ratio: '1:1',
-      format: 'png',
-      isStoreProduct: true,
-      source: 'nutrifitness.ch'
-    }));
 
     let cloudinaryMedia = [];
     try {
       cloudinaryMedia = await fetchCloudinaryMedia();
-    } catch (e) {
-      console.warn('Cloudinary fetch skipped:', e.message);
-    }
+    } catch (e) {}
 
-    const all = [...productMedia, ...localMedia, ...cloudinaryMedia];
+    const all = [...products, ...localMedia, ...cloudinaryMedia];
 
     res.json({
       total: all.length,
-      productsCount: productMedia.length,
+      productsCount: products.length,
       localCount: localMedia.length,
       cloudinaryCount: cloudinaryMedia.length,
       resources: all

@@ -9,8 +9,8 @@ import { sanitizeInstagramCaption } from './aiCaptionService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const PRODUCTS_DIR = path.join(__dirname, '../../../products');
 const LOCAL_MEDIA_DIR = path.join(__dirname, '../../../nutriftness.ch');
-const PRODUCTS_DIR = path.join(__dirname, '../../../nutrifitness_products');
 
 function getEmailSender() {
   const settings = getSettings();
@@ -44,7 +44,8 @@ export function generateApprovalEmailHtml(draft, approvalUrl, editUrl, hasInline
   const mediaUrl = hasInlineAttachment ? 'cid:visual_post' : (draft.media?.secure_url || '');
   const igCaption = draft.captions?.instagramCaption || '';
   const slotTime = draft.slotTime || '08:30';
-  const theme = draft.theme?.toUpperCase() || 'MOTIVATION';
+  const theme = draft.theme?.toUpperCase() || 'PRODUIT & FORCE';
+  const productTitle = draft.media?.title || 'Produit Officiel NutriFitness';
 
   return `
 <!DOCTYPE html>
@@ -59,8 +60,8 @@ export function generateApprovalEmailHtml(draft, approvalUrl, editUrl, hasInline
     .header p { margin: 0; font-size: 13px; opacity: 0.9; }
     .body { padding: 24px; }
     .badge { display: inline-block; background: #0f172a; color: #34d399; padding: 6px 14px; border-radius: 8px; font-size: 11px; font-weight: 800; text-transform: uppercase; margin-bottom: 18px; border: 1px solid #059669; }
-    .image-container { border-radius: 14px; overflow: hidden; margin-bottom: 22px; background: #0f172a; text-align: center; padding: 15px; }
-    .image-container img { max-width: 85%; height: auto; display: block; margin: 0 auto; border-radius: 10px; }
+    .image-container { border-radius: 14px; overflow: hidden; margin-bottom: 22px; background: #0f172a; text-align: center; padding: 20px; border: 1px solid #1e293b; }
+    .image-container img { max-width: 80%; height: auto; display: block; margin: 0 auto; border-radius: 8px; }
     .caption-box { background: #030712; border-radius: 14px; padding: 20px; border: 1px solid #1f2937; margin-bottom: 24px; }
     .caption-box h3 { margin: 0 0 10px 0; font-size: 12px; color: #34d399; text-transform: uppercase; letter-spacing: 0.5px; }
     .caption-text { font-size: 13px; line-height: 1.6; color: #e5e7eb; white-space: pre-wrap; margin: 0; }
@@ -74,13 +75,13 @@ export function generateApprovalEmailHtml(draft, approvalUrl, editUrl, hasInline
   <div class="card">
     <div class="header">
       <h1>🇨🇭 NutriFitness Social Suite</h1>
-      <p>Nouveau post en attente de votre validation</p>
+      <p>Produit Réel Client : ${productTitle}</p>
     </div>
     <div class="body">
-      <div class="badge">⏰ Créneau Prévu : ${slotTime} CET • ${theme}</div>
+      <div class="badge">⏰ Publication Prévue : ${slotTime} CET • ${theme}</div>
       
       <div class="image-container">
-        <img src="${mediaUrl}" alt="Visuel NutriFitness Suisse" />
+        <img src="${mediaUrl}" alt="${productTitle}" />
       </div>
 
       <div class="caption-box">
@@ -109,16 +110,16 @@ export function generateApprovalEmailHtml(draft, approvalUrl, editUrl, hasInline
 
 async function getImageAttachment(draft) {
   try {
-    const filename = draft.media?.filename || path.basename(draft.media?.secure_url || 'ISO_BULK_2KG.png');
-    
-    // Check in nutrifitness_products first
+    const filename = draft.media?.filename || path.basename(draft.media?.secure_url || '');
+
+    // Check in products folder
     const prodFile = path.join(PRODUCTS_DIR, filename);
     if (fs.existsSync(prodFile)) {
       const buffer = fs.readFileSync(prodFile);
       return {
         filename,
         content: buffer.toString('base64'),
-        content_type: filename.endsWith('.png') ? 'image/png' : 'image/webp',
+        content_type: filename.endsWith('.png') ? 'image/png' : filename.endsWith('.webp') ? 'image/webp' : 'image/jpeg',
         disposition: 'inline',
         cid: 'visual_post'
       };
@@ -166,9 +167,8 @@ export async function sendApprovalEmailToClient(draftId, clientEmailOverride = n
   // 🔒 HARD SAFETY LOCK CHECK
   let recipientEmail = clientEmailOverride || settings.safetyLock?.supervisorEmail || 'avadhbajaj07@gmail.com';
   
-  // If target is Marco, verify if safetyLock is explicitly bypassed by supervisor
   if (clientEmailOverride === 'marco.scarpantoni@hotmail.com' && !settings.safetyLock?.sendToMarcoAllowed) {
-    addLog('warning', `[VERROU DE SÉCURITÉ ACTIF] L'envoi automatique à Marco est bloqué. Redirigé en toute sécurité vers ${settings.safetyLock.supervisorEmail}`);
+    addLog('warning', `[VERROU DE SÉCURITÉ ACTIF] L'envoi automatique à Marco est bloqué. Redirigé vers ${settings.safetyLock.supervisorEmail}`);
     recipientEmail = settings.safetyLock.supervisorEmail;
   }
 
@@ -183,7 +183,7 @@ export async function sendApprovalEmailToClient(draftId, clientEmailOverride = n
   const htmlContent = generateApprovalEmailHtml(draft, approvalUrl, editUrl, !!attachment);
 
   const fromEmail = process.env.SENDER_EMAIL || settings.email?.senderEmail || 'Hello@avadhbajaj.com';
-  const subject = `🇨🇭 [Validation Requise] Post Instagram & Pinterest - ${draft.theme?.toUpperCase()} (${draft.slotTime || '08:30'})`;
+  const subject = `🇨🇭 [Validation Requise] Post Produit Réel - ${draft.media?.title || 'NutriFitness'}`;
 
   if (sender?.type === 'resend') {
     try {
@@ -196,7 +196,7 @@ export async function sendApprovalEmailToClient(draftId, clientEmailOverride = n
       };
 
       const data = await sender.client.emails.send(emailPayload);
-      addLog('success', `Email Resend sécurisé envoyé à ${recipientEmail}`);
+      addLog('success', `Email Resend envoyé avec produit réel à ${recipientEmail}`);
       
       updateDraft(draftId, {
         emailSentTo: recipientEmail,

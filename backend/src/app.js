@@ -16,6 +16,7 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const LOCAL_MEDIA_PATH = path.join(__dirname, '../../nutriftness.ch');
+const PRODUCTS_MEDIA_PATH = path.join(__dirname, '../../products');
 
 const app = express();
 
@@ -23,7 +24,8 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Serve local nutrifitness.ch media files
+// Serve real client products from /products folder
+app.use('/products-media', express.static(PRODUCTS_MEDIA_PATH));
 app.use('/local-media', express.static(LOCAL_MEDIA_PATH));
 
 // API Endpoints
