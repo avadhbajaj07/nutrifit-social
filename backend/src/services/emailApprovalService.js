@@ -1,30 +1,36 @@
 import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { getSettings, updateDraft, getDrafts, addLog } from './storageService.js';
 import { sanitizeInstagramCaption } from './aiCaptionService.js';
 
-function createEmailTransporter() {
+function getEmailSender() {
   const settings = getSettings();
-  const smtp = settings.email || {};
+  const resendApiKey = process.env.RESEND_API_KEY || settings.email?.resendApiKey;
 
-  if (smtp.host && smtp.user && smtp.pass) {
-    return nodemailer.createTransport({
-      host: smtp.host,
-      port: smtp.port || 587,
-      secure: smtp.port === 465,
-      auth: {
-        user: smtp.user,
-        pass: smtp.pass
-      }
-    });
+  if (resendApiKey) {
+    const resend = new Resend(resendApiKey);
+    return { type: 'resend', client: resend };
   }
 
-  // Fallback test transporter
+  const smtp = settings.email || {};
+  const host = process.env.SMTP_HOST || smtp.host;
+  const user = process.env.SMTP_USER || smtp.user;
+  const pass = process.env.SMTP_PASS || smtp.pass;
+  const port = process.env.SMTP_PORT || smtp.port || 587;
+
+  if (host && user && pass) {
+    const transporter = nodemailer.createTransport({
+      host,
+      port: Number(port),
+      secure: Number(port) === 465,
+      auth: { user, pass }
+    });
+    return { type: 'smtp', client: transporter };
+  }
+
   return null;
 }
 
-/**
- * Generate formatted HTML email for client approval
- */
 export function generateApprovalEmailHtml(draft, approvalUrl, editUrl) {
   const mediaUrl = draft.media?.secure_url || '';
   const igCaption = draft.captions?.instagramCaption || '';
@@ -94,9 +100,6 @@ export function generateApprovalEmailHtml(draft, approvalUrl, editUrl) {
 `;
 }
 
-/**
- * Send approval request email to the client
- */
 export async function sendApprovalEmailToClient(draftId, clientEmailOverride = null) {
   const settings = getSettings();
   const drafts = getDrafts();
@@ -106,38 +109,66 @@ export async function sendApprovalEmailToClient(draftId, clientEmailOverride = n
     throw new Error('Brouillon introuvable');
   }
 
-  const recipientEmail = clientEmailOverride || settings.email?.clientEmail || 'client@nutrifitness.ch';
-  const baseUrl = process.env.APP_BASE_URL || 'http://localhost:5001';
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const recipientEmail = clientEmailOverride || process.env.CLIENT_EMAIL || settings.email?.clientEmail || 'marco.scarpantoni@hotmail.com';
+  const baseUrl = process.env.APP_BASE_URL || 'https://nutrifitness-social-media-desidreams.vercel.app';
+  const frontendUrl = process.env.FRONTEND_URL || 'https://nutrifitness-social-media-desidreams.vercel.app';
 
-  // Secure token approval links
   const approvalUrl = `${baseUrl}/api/email-approval/approve/${draft.id}?action=approve`;
   const editUrl = `${frontendUrl}/?tab=approval&draftId=${draft.id}`;
 
-  const transporter = createEmailTransporter();
+  const sender = getEmailSender();
   const htmlContent = generateApprovalEmailHtml(draft, approvalUrl, editUrl);
 
-  const emailDetails = {
-    from: settings.email?.senderEmail || '"NutriFitness Automation" <social@nutrifitness.ch>',
-    to: recipientEmail,
-    subject: `[Validation Requise] Post Instagram & Pinterest - ${draft.theme?.toUpperCase()} (${draft.slotTime || '08:30'})`,
-    html: htmlContent
-  };
+  const fromEmail = process.env.SENDER_EMAIL || settings.email?.senderEmail || 'NutriFitness <onboarding@resend.dev>';
+  const subject = `[Validation Requise] Post Instagram & Pinterest - ${draft.theme?.toUpperCase()} (${draft.slotTime || '08:30'})`;
 
-  if (transporter) {
+  // 1. Send via Resend if configured
+  if (sender?.type === 'resend') {
     try {
-      const info = await transporter.sendMail(emailDetails);
-      addLog('success', `Email de validation envoyé au client (${recipientEmail}) pour le post ${draftId}`);
-      return { success: true, isSimulated: false, messageId: info.messageId, recipient: recipientEmail };
+      const data = await sender.client.emails.send({
+        from: fromEmail,
+        to: recipientEmail,
+        subject,
+        html: htmlContent
+      });
+      addLog('success', `Email Resend envoyé avec succès à ${recipientEmail} (ID: ${data.data?.id || 'ok'})`);
+      
+      updateDraft(draftId, {
+        emailSentTo: recipientEmail,
+        emailSentAt: new Date().toISOString()
+      });
+
+      return { success: true, provider: 'resend', id: data.data?.id, recipient: recipientEmail };
     } catch (err) {
-      addLog('warn', `Erreur envoi SMTP, simulation de l'envoi email : ${err.message}`);
+      addLog('error', `Erreur envoi Resend : ${err.message}`);
     }
   }
 
-  // Simulation mode (logs approval email for instant testing without mandatory SMTP configuration)
-  addLog('success', `[Simulation Email] Email de validation envoyé à ${recipientEmail} pour le post ${draftId}`);
-  
-  // Update draft with email dispatch status
+  // 2. Send via SMTP if configured
+  if (sender?.type === 'smtp') {
+    try {
+      const info = await sender.client.sendMail({
+        from: fromEmail,
+        to: recipientEmail,
+        subject,
+        html: htmlContent
+      });
+      addLog('success', `Email SMTP envoyé avec succès à ${recipientEmail}`);
+      
+      updateDraft(draftId, {
+        emailSentTo: recipientEmail,
+        emailSentAt: new Date().toISOString()
+      });
+
+      return { success: true, provider: 'smtp', messageId: info.messageId, recipient: recipientEmail };
+    } catch (err) {
+      addLog('error', `Erreur envoi SMTP : ${err.message}`);
+    }
+  }
+
+  // 3. Fallback preview/simulation mode
+  addLog('info', `[Email Preview] Prêt pour envoi à ${recipientEmail} (${subject})`);
+
   updateDraft(draftId, {
     emailSentTo: recipientEmail,
     emailSentAt: new Date().toISOString()
@@ -149,16 +180,11 @@ export async function sendApprovalEmailToClient(draftId, clientEmailOverride = n
     recipient: recipientEmail,
     approvalUrl,
     editUrl,
-    subject: emailDetails.subject,
+    subject,
     html: htmlContent
   };
 }
 
-/**
- * Handle incoming email reply from the client:
- * 1. Checks for positive approval keyword ("oui", "ok", "approuvé", "approved", "valider", "go", "top")
- * 2. If client replied with revised text, updates caption automatically and approves!
- */
 export function processClientEmailReply(draftId, replyBody = '') {
   const drafts = getDrafts();
   const draft = drafts.find(d => d.id === draftId);
@@ -174,7 +200,6 @@ export function processClientEmailReply(draftId, replyBody = '') {
   const isDirectApproval = approvalKeywords.some(k => lower === k || lower.startsWith(k + ' ') || lower.startsWith(k + '!') || lower.startsWith(k + '.'));
 
   if (isDirectApproval) {
-    // 1. Direct approval with no text edits
     const updated = updateDraft(draftId, {
       status: 'APPROVED',
       approvedAt: new Date().toISOString(),
@@ -182,7 +207,7 @@ export function processClientEmailReply(draftId, replyBody = '') {
       clientFeedback: `Approuvé par email : "${cleanedBody}"`
     });
 
-    addLog('success', `Client a approuvé le post (${draftId}) directement par email ! Status: APPROVED ✅`);
+    addLog('success', `Client (marco.scarpantoni@hotmail.com) a approuvé le post (${draftId}) par email ! Status: APPROVED ✅`);
     return {
       success: true,
       action: 'APPROVED_DIRECT',
@@ -190,7 +215,6 @@ export function processClientEmailReply(draftId, replyBody = '') {
       message: 'Post approuvé avec succès par email.'
     };
   } else {
-    // 2. Client sent revised caption text in email reply
     const sanitized = sanitizeInstagramCaption(cleanedBody);
     const updated = updateDraft(draftId, {
       status: 'APPROVED',
