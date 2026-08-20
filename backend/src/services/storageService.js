@@ -1,25 +1,29 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.join(__dirname, '../../data');
+
+// In serverless / Vercel environments, write to os.tmpdir()
+const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
+const DATA_DIR = isServerless ? path.join(os.tmpdir(), 'nutrifitness-data') : path.join(__dirname, '../../data');
 const STORE_PATH = path.join(DATA_DIR, 'store.json');
 
 const DEFAULT_DATA = {
   settings: {
     cloudinary: {
       cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
-      apiKey: process.env.CLOUDINARY_API_KEY || '',
-      apiSecret: process.env.CLOUDINARY_API_SECRET || '',
-      folder: process.env.CLOUDINARY_FOLDER || 'nutrifitness/posts'
+      apiKey: process.env.CLOUDINARY_API_KEY || '714623535956272',
+      apiSecret: process.env.CLOUDINARY_API_SECRET || 'LwxYhU0APxRkMeS-nVfG6FvOMf0',
+      folder: process.env.CLOUDINARY_FOLDER || 'nutrifitness'
     },
     blotato: {
-      apiKey: process.env.BLOTATO_API_KEY || '',
-      accountId: process.env.BLOTATO_ACCOUNT_ID || '',
-      instagramSubaccountId: process.env.BLOTATO_IG_SUBACCOUNT_ID || '',
-      pinterestSubaccountId: process.env.BLOTATO_PIN_SUBACCOUNT_ID || '',
+      apiKey: process.env.BLOTATO_API_KEY || 'blt_xf24o9kuR/K6NKt6wDQ+c1Snut78GOX41jiqMJO5P7U=',
+      accountId: process.env.BLOTATO_ACCOUNT_ID || '63353',
+      instagramSubaccountId: process.env.BLOTATO_IG_SUBACCOUNT_ID || '63353',
+      pinterestSubaccountId: process.env.BLOTATO_PIN_SUBACCOUNT_ID || '8915',
       pinterestBoardId: process.env.BLOTATO_PIN_BOARD_ID || ''
     },
     openai: {
@@ -27,7 +31,7 @@ const DEFAULT_DATA = {
     },
     scheduling: {
       enabled: true,
-      requireClientApproval: true, // Only post after client approves
+      requireClientApproval: true,
       timezone: 'Europe/Zurich',
       slots: [
         { id: 'slot-morning', label: 'Matin (Motivation & Réveil)', time: '08:30', cron: '30 8 * * *', theme: 'motivation' },
@@ -51,45 +55,58 @@ const DEFAULT_DATA = {
   logs: []
 };
 
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+// In-memory cache for fast serverless responses
+let memoryStore = null;
+
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Cannot create DATA_DIR, using in-memory store:', e.message);
 }
 
 export function loadStore() {
+  if (memoryStore) return memoryStore;
+
   try {
-    if (!fs.existsSync(STORE_PATH)) {
-      saveStore(DEFAULT_DATA);
-      return DEFAULT_DATA;
+    if (fs.existsSync(STORE_PATH)) {
+      const raw = fs.readFileSync(STORE_PATH, 'utf-8');
+      const parsed = JSON.parse(raw);
+      memoryStore = {
+        settings: {
+          ...DEFAULT_DATA.settings,
+          ...parsed.settings,
+          cloudinary: { ...DEFAULT_DATA.settings.cloudinary, ...(parsed.settings?.cloudinary || {}) },
+          blotato: { ...DEFAULT_DATA.settings.blotato, ...(parsed.settings?.blotato || {}) },
+          scheduling: { ...DEFAULT_DATA.settings.scheduling, ...(parsed.settings?.scheduling || {}) },
+          audience: { ...DEFAULT_DATA.settings.audience, ...(parsed.settings?.audience || {}) }
+        },
+        drafts: parsed.drafts || [],
+        postsHistory: parsed.postsHistory || [],
+        logs: parsed.logs || []
+      };
+      return memoryStore;
     }
-    const raw = fs.readFileSync(STORE_PATH, 'utf-8');
-    const parsed = JSON.parse(raw);
-    return {
-      settings: {
-        ...DEFAULT_DATA.settings,
-        ...parsed.settings,
-        cloudinary: { ...DEFAULT_DATA.settings.cloudinary, ...(parsed.settings?.cloudinary || {}) },
-        blotato: { ...DEFAULT_DATA.settings.blotato, ...(parsed.settings?.blotato || {}) },
-        scheduling: { ...DEFAULT_DATA.settings.scheduling, ...(parsed.settings?.scheduling || {}) },
-        audience: { ...DEFAULT_DATA.settings.audience, ...(parsed.settings?.audience || {}) }
-      },
-      drafts: parsed.drafts || [],
-      postsHistory: parsed.postsHistory || [],
-      logs: parsed.logs || []
-    };
   } catch (error) {
-    console.error('[Storage] Error reading store.json, using defaults:', error);
-    return DEFAULT_DATA;
+    console.warn('[Storage] Fallback to default in-memory store:', error.message);
   }
+
+  memoryStore = { ...DEFAULT_DATA };
+  return memoryStore;
 }
 
 export function saveStore(data) {
+  memoryStore = data;
   try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
     fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), 'utf-8');
     return true;
   } catch (error) {
-    console.error('[Storage] Error writing store.json:', error);
-    return false;
+    console.warn('[Storage] Write to disk skipped, retained in memory:', error.message);
+    return true;
   }
 }
 
@@ -112,7 +129,6 @@ export function updateSettings(newSettings) {
   return store.settings;
 }
 
-// Drafts Management (Client Approval Workflow)
 export function getDrafts() {
   const store = loadStore();
   return store.drafts || [];
@@ -123,7 +139,7 @@ export function createDraft(draftData) {
   const newDraft = {
     id: draftData.id || 'draft_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
     createdAt: new Date().toISOString(),
-    status: 'PENDING_APPROVAL', // PENDING_APPROVAL, APPROVED, REJECTED, POSTED
+    status: 'PENDING_APPROVAL',
     theme: draftData.theme || 'motivation',
     slotTime: draftData.slotTime || '08:30',
     media: draftData.media,
@@ -195,7 +211,7 @@ export function addLog(level, message, metadata = {}) {
     store.logs = store.logs.slice(0, 300);
   }
   saveStore(store);
-  console.log(`[${level.toUpperCase()}] ${message}`, metadata);
+  console.log(`[${level.toUpperCase()}] ${message}`);
   return logEntry;
 }
 
