@@ -1,7 +1,15 @@
 import nodemailer from 'nodemailer';
 import { Resend } from 'resend';
+import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { getSettings, updateDraft, getDrafts, addLog } from './storageService.js';
 import { sanitizeInstagramCaption } from './aiCaptionService.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const LOCAL_MEDIA_DIR = path.join(__dirname, '../../../nutriftness.ch');
 
 function getEmailSender() {
   const settings = getSettings();
@@ -31,8 +39,8 @@ function getEmailSender() {
   return null;
 }
 
-export function generateApprovalEmailHtml(draft, approvalUrl, editUrl) {
-  const mediaUrl = draft.media?.secure_url || '';
+export function generateApprovalEmailHtml(draft, approvalUrl, editUrl, hasInlineAttachment = true) {
+  const mediaUrl = hasInlineAttachment ? 'cid:visual_post' : (draft.media?.secure_url || '');
   const igCaption = draft.captions?.instagramCaption || '';
   const slotTime = draft.slotTime || '08:30';
   const theme = draft.theme?.toUpperCase() || 'MOTIVATION';
@@ -44,21 +52,20 @@ export function generateApprovalEmailHtml(draft, approvalUrl, editUrl) {
   <meta charset="utf-8">
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b0f19; color: #f1f5f9; margin: 0; padding: 20px; }
-    .card { max-width: 600px; margin: 0 auto; background: #131a2a; border-radius: 16px; border: 1px solid #23304a; overflow: hidden; }
+    .card { max-width: 600px; margin: 0 auto; background: #131a2a; border-radius: 16px; border: 1px solid #23304a; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
     .header { background: linear-gradient(135deg, #059669, #0d9488); padding: 24px; text-align: center; color: white; }
     .header h1 { margin: 0 0 6px 0; font-size: 22px; font-weight: 800; }
     .header p { margin: 0; font-size: 13px; opacity: 0.9; }
     .body { padding: 24px; }
-    .badge { display: inline-block; background: #1e293b; color: #38bdf8; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 16px; }
+    .badge { display: inline-block; background: #1e293b; color: #38bdf8; padding: 5px 12px; border-radius: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 16px; border: 1px solid #334155; }
     .image-container { border-radius: 12px; overflow: hidden; margin-bottom: 20px; background: #000; text-align: center; }
-    .image-container img { max-width: 100%; height: auto; max-height: 450px; display: block; margin: 0 auto; }
+    .image-container img { max-width: 100%; height: auto; display: block; margin: 0 auto; border-radius: 12px; }
     .caption-box { background: #080c14; border-radius: 12px; padding: 18px; border: 1px solid #1e293b; margin-bottom: 24px; }
-    .caption-box h3 { margin: 0 0 10px 0; font-size: 13px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+    .caption-box h3 { margin: 0 0 10px 0; font-size: 12px; color: #10b981; text-transform: uppercase; letter-spacing: 0.5px; }
     .caption-text { font-size: 13px; line-height: 1.6; color: #e2e8f0; white-space: pre-wrap; margin: 0; }
-    .btn-container { text-align: center; margin: 24px 0; }
-    .btn-approve { display: inline-block; background: #10b981; color: #ffffff !important; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 700; font-size: 14px; margin: 0 6px 10px 6px; }
-    .btn-edit { display: inline-block; background: #334155; color: #ffffff !important; text-decoration: none; padding: 14px 24px; border-radius: 10px; font-weight: 600; font-size: 13px; margin: 0 6px 10px 6px; }
-    .reply-instructions { background: #1e293b/60; border-left: 3px solid #38bdf8; padding: 12px 16px; border-radius: 6px; font-size: 12px; color: #cbd5e1; line-height: 1.5; margin-top: 20px; }
+    .btn-container { text-align: center; margin: 26px 0; }
+    .btn-approve { display: inline-block; background: #10b981; color: #ffffff !important; text-decoration: none; padding: 16px 36px; border-radius: 12px; font-weight: 800; font-size: 15px; margin: 0 6px 10px 6px; box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4); }
+    .reply-instructions { background: rgba(30, 41, 59, 0.6); border-left: 3px solid #38bdf8; padding: 14px 18px; border-radius: 8px; font-size: 12px; color: #cbd5e1; line-height: 1.6; margin-top: 20px; }
     .footer { text-align: center; padding: 16px; font-size: 11px; color: #64748b; border-top: 1px solid #1e293b; }
   </style>
 </head>
@@ -69,10 +76,10 @@ export function generateApprovalEmailHtml(draft, approvalUrl, editUrl) {
       <p>Nouveau post en attente de votre validation client</p>
     </div>
     <div class="body">
-      <div class="badge">⏰ Publication prévue : ${slotTime} CET • ${theme}</div>
+      <div class="badge">⏰ Créneau Prévu : ${slotTime} CET • ${theme}</div>
       
       <div class="image-container">
-        <img src="${mediaUrl}" alt="Visuel NutriFitness" />
+        <img src="${mediaUrl}" alt="Visuel NutriFitness Suisse" />
       </div>
 
       <div class="caption-box">
@@ -81,23 +88,55 @@ export function generateApprovalEmailHtml(draft, approvalUrl, editUrl) {
       </div>
 
       <div class="btn-container">
-        <a href="${approvalUrl}" class="btn-approve">✅ APPROUVER & PROGRAMMER</a>
-        <a href="${editUrl}" class="btn-edit">✏️ MODIFIER LE POST</a>
+        <a href="${approvalUrl}" class="btn-approve">✅ APPROUVER & PROGRAMMER CE POST</a>
       </div>
 
       <div class="reply-instructions">
-        💡 <strong>Vous pouvez aussi répondre directement à cet email :</strong><br/>
-        • Répondez simplement <strong>"OUI"</strong> ou <strong>"APPROUVÉ"</strong> pour valider.<br/>
-        • Ou répondez avec votre texte corrigé pour remplacer la légende automatiquement.
+        💡 <strong>Vous pouvez également approuver directement par email :</strong><br/>
+        • Répondez simplement <strong>"OUI"</strong> ou <strong>"APPROUVÉ"</strong> à cet email.<br/>
+        • Ou répondez avec vos corrections pour modifier la légende automatiquement.
       </div>
     </div>
     <div class="footer">
-      NutriFitness.ch • Automatisation Instagram & Pinterest Suisse Romande
+      NutriFitness.ch • 34 Rue des Pâquis, 1201 Genève • Instagram & Pinterest Automation
     </div>
   </div>
 </body>
 </html>
 `;
+}
+
+async function getImageAttachment(draft) {
+  try {
+    const filename = draft.media?.filename || path.basename(draft.media?.secure_url || 'nutrifitness_swiss_model_01.jpg');
+    const localFile = path.join(LOCAL_MEDIA_DIR, filename);
+
+    if (fs.existsSync(localFile)) {
+      const buffer = fs.readFileSync(localFile);
+      return {
+        filename,
+        content: buffer.toString('base64'),
+        content_type: filename.endsWith('.png') ? 'image/png' : 'image/jpeg',
+        disposition: 'inline',
+        cid: 'visual_post'
+      };
+    }
+
+    if (draft.media?.secure_url?.startsWith('http')) {
+      const response = await axios.get(draft.media.secure_url, { responseType: 'arraybuffer', timeout: 10000 });
+      const base64 = Buffer.from(response.data).toString('base64');
+      return {
+        filename: 'visual_post.jpg',
+        content: base64,
+        content_type: 'image/jpeg',
+        disposition: 'inline',
+        cid: 'visual_post'
+      };
+    }
+  } catch (err) {
+    console.warn('Could not generate inline attachment:', err.message);
+  }
+  return null;
 }
 
 export async function sendApprovalEmailToClient(draftId, clientEmailOverride = null) {
@@ -117,21 +156,24 @@ export async function sendApprovalEmailToClient(draftId, clientEmailOverride = n
   const editUrl = `${frontendUrl}/?tab=approval&draftId=${draft.id}`;
 
   const sender = getEmailSender();
-  const htmlContent = generateApprovalEmailHtml(draft, approvalUrl, editUrl);
+  const attachment = await getImageAttachment(draft);
+  const htmlContent = generateApprovalEmailHtml(draft, approvalUrl, editUrl, !!attachment);
 
-  const fromEmail = process.env.SENDER_EMAIL || settings.email?.senderEmail || 'NutriFitness <onboarding@resend.dev>';
-  const subject = `[Validation Requise] Post Instagram & Pinterest - ${draft.theme?.toUpperCase()} (${draft.slotTime || '08:30'})`;
+  const fromEmail = process.env.SENDER_EMAIL || settings.email?.senderEmail || 'Hello@avadhbajaj.com';
+  const subject = `🇨🇭 [Validation Requise] Post Instagram & Pinterest - ${draft.theme?.toUpperCase()} (${draft.slotTime || '08:30'})`;
 
-  // 1. Send via Resend if configured
   if (sender?.type === 'resend') {
     try {
-      const data = await sender.client.emails.send({
+      const emailPayload = {
         from: fromEmail,
         to: recipientEmail,
         subject,
-        html: htmlContent
-      });
-      addLog('success', `Email Resend envoyé avec succès à ${recipientEmail} (ID: ${data.data?.id || 'ok'})`);
+        html: htmlContent,
+        ...(attachment ? { attachments: [attachment] } : {})
+      };
+
+      const data = await sender.client.emails.send(emailPayload);
+      addLog('success', `Email Resend envoyé avec visuel intégré à ${recipientEmail}`);
       
       updateDraft(draftId, {
         emailSentTo: recipientEmail,
@@ -143,36 +185,6 @@ export async function sendApprovalEmailToClient(draftId, clientEmailOverride = n
       addLog('error', `Erreur envoi Resend : ${err.message}`);
     }
   }
-
-  // 2. Send via SMTP if configured
-  if (sender?.type === 'smtp') {
-    try {
-      const info = await sender.client.sendMail({
-        from: fromEmail,
-        to: recipientEmail,
-        subject,
-        html: htmlContent
-      });
-      addLog('success', `Email SMTP envoyé avec succès à ${recipientEmail}`);
-      
-      updateDraft(draftId, {
-        emailSentTo: recipientEmail,
-        emailSentAt: new Date().toISOString()
-      });
-
-      return { success: true, provider: 'smtp', messageId: info.messageId, recipient: recipientEmail };
-    } catch (err) {
-      addLog('error', `Erreur envoi SMTP : ${err.message}`);
-    }
-  }
-
-  // 3. Fallback preview/simulation mode
-  addLog('info', `[Email Preview] Prêt pour envoi à ${recipientEmail} (${subject})`);
-
-  updateDraft(draftId, {
-    emailSentTo: recipientEmail,
-    emailSentAt: new Date().toISOString()
-  });
 
   return {
     success: true,
@@ -207,7 +219,7 @@ export function processClientEmailReply(draftId, replyBody = '') {
       clientFeedback: `Approuvé par email : "${cleanedBody}"`
     });
 
-    addLog('success', `Client (marco.scarpantoni@hotmail.com) a approuvé le post (${draftId}) par email ! Status: APPROVED ✅`);
+    addLog('success', `Client (${draft.emailSentTo || 'client'}) a approuvé le post (${draftId}) par email ! Status: APPROVED ✅`);
     return {
       success: true,
       action: 'APPROVED_DIRECT',
