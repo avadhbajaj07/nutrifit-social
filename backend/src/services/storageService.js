@@ -6,13 +6,22 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// In serverless / Vercel environments, write to os.tmpdir()
 const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
 const DATA_DIR = isServerless ? path.join(os.tmpdir(), 'nutrifitness-data') : path.join(__dirname, '../../data');
 const STORE_PATH = path.join(DATA_DIR, 'store.json');
 
 const DEFAULT_DATA = {
   settings: {
+    safetyLock: {
+      sendToMarcoAllowed: false, // HARD SAFETY LOCK: Marco will NEVER receive an email without explicit approval
+      supervisorEmail: 'avadhbajaj07@gmail.com',
+      clientEmail: 'marco.scarpantoni@hotmail.com'
+    },
+    email: {
+      senderEmail: 'Hello@avadhbajaj.com',
+      clientEmail: 'avadhbajaj07@gmail.com', // Safe default: only send to you during review
+      resendApiKey: process.env.RESEND_API_KEY || ''
+    },
     cloudinary: {
       cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
       apiKey: process.env.CLOUDINARY_API_KEY || '714623535956272',
@@ -23,14 +32,10 @@ const DEFAULT_DATA = {
       apiKey: process.env.BLOTATO_API_KEY || 'blt_xf24o9kuR/K6NKt6wDQ+c1Snut78GOX41jiqMJO5P7U=',
       accountId: process.env.BLOTATO_ACCOUNT_ID || '63353',
       instagramSubaccountId: process.env.BLOTATO_IG_SUBACCOUNT_ID || '63353',
-      pinterestSubaccountId: process.env.BLOTATO_PIN_SUBACCOUNT_ID || '8915',
-      pinterestBoardId: process.env.BLOTATO_PIN_BOARD_ID || ''
-    },
-    openai: {
-      apiKey: process.env.OPENAI_API_KEY || ''
+      pinterestSubaccountId: process.env.BLOTATO_PIN_SUBACCOUNT_ID || '8915'
     },
     scheduling: {
-      enabled: true,
+      enabled: false, // Disabled until you approve
       requireClientApproval: true,
       timezone: 'Europe/Zurich',
       slots: [
@@ -55,16 +60,13 @@ const DEFAULT_DATA = {
   logs: []
 };
 
-// In-memory cache for fast serverless responses
 let memoryStore = null;
 
 try {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
-} catch (e) {
-  console.warn('Cannot create DATA_DIR, using in-memory store:', e.message);
-}
+} catch (e) {}
 
 export function loadStore() {
   if (memoryStore) return memoryStore;
@@ -77,10 +79,8 @@ export function loadStore() {
         settings: {
           ...DEFAULT_DATA.settings,
           ...parsed.settings,
-          cloudinary: { ...DEFAULT_DATA.settings.cloudinary, ...(parsed.settings?.cloudinary || {}) },
-          blotato: { ...DEFAULT_DATA.settings.blotato, ...(parsed.settings?.blotato || {}) },
-          scheduling: { ...DEFAULT_DATA.settings.scheduling, ...(parsed.settings?.scheduling || {}) },
-          audience: { ...DEFAULT_DATA.settings.audience, ...(parsed.settings?.audience || {}) }
+          safetyLock: { ...DEFAULT_DATA.settings.safetyLock, ...(parsed.settings?.safetyLock || {}) },
+          email: { ...DEFAULT_DATA.settings.email, ...(parsed.settings?.email || {}) }
         },
         drafts: parsed.drafts || [],
         postsHistory: parsed.postsHistory || [],
@@ -88,9 +88,7 @@ export function loadStore() {
       };
       return memoryStore;
     }
-  } catch (error) {
-    console.warn('[Storage] Fallback to default in-memory store:', error.message);
-  }
+  } catch (error) {}
 
   memoryStore = { ...DEFAULT_DATA };
   return memoryStore;
@@ -103,11 +101,8 @@ export function saveStore(data) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
     fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), 'utf-8');
-    return true;
-  } catch (error) {
-    console.warn('[Storage] Write to disk skipped, retained in memory:', error.message);
-    return true;
-  }
+  } catch (error) {}
+  return true;
 }
 
 export function getSettings() {
@@ -120,10 +115,8 @@ export function updateSettings(newSettings) {
   store.settings = {
     ...store.settings,
     ...newSettings,
-    cloudinary: { ...store.settings.cloudinary, ...(newSettings.cloudinary || {}) },
-    blotato: { ...store.settings.blotato, ...(newSettings.blotato || {}) },
-    scheduling: { ...store.settings.scheduling, ...(newSettings.scheduling || {}) },
-    audience: { ...store.settings.audience, ...(newSettings.audience || {}) }
+    safetyLock: { ...store.settings.safetyLock, ...(newSettings.safetyLock || {}) },
+    email: { ...store.settings.email, ...(newSettings.email || {}) }
   };
   saveStore(store);
   return store.settings;
