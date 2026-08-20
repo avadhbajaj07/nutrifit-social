@@ -1,0 +1,21 @@
+# Dependencies
+node_modules
+*/node_modules
+
+# Production Build
+dist
+*/dist
+
+# Environment variables & secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# Local data & logs
+backend/data/*.json
+*.log
+.DS_Store
+
+# Vercel
+.vercel
