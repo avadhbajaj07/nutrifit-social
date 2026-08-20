@@ -40,11 +40,11 @@ function getEmailSender() {
   return null;
 }
 
-export function generateApprovalEmailHtml(draft, approvalUrl, editUrl, hasInlineAttachment = true) {
+export function generateApprovalEmailHtml(draft, approvalUrl, editUrl, rejectUrl, hasInlineAttachment = true) {
   const mediaUrl = hasInlineAttachment ? 'cid:visual_post' : (draft.media?.secure_url || '');
   const igCaption = draft.captions?.instagramCaption || '';
   const slotTime = draft.slotTime || '08:30';
-  const theme = draft.theme?.toUpperCase() || 'PRODUIT & FORCE';
+  const theme = draft.theme?.toUpperCase() || 'PRODUIT & PERFORMANCE';
   const productTitle = draft.media?.title || 'Produit Officiel NutriFitness';
 
   return `
@@ -61,12 +61,18 @@ export function generateApprovalEmailHtml(draft, approvalUrl, editUrl, hasInline
     .body { padding: 24px; }
     .badge { display: inline-block; background: #0f172a; color: #34d399; padding: 6px 14px; border-radius: 8px; font-size: 11px; font-weight: 800; text-transform: uppercase; margin-bottom: 18px; border: 1px solid #059669; }
     .image-container { border-radius: 14px; overflow: hidden; margin-bottom: 22px; background: #0f172a; text-align: center; padding: 20px; border: 1px solid #1e293b; }
-    .image-container img { max-width: 80%; height: auto; display: block; margin: 0 auto; border-radius: 8px; }
+    .image-container img { max-width: 85%; height: auto; display: block; margin: 0 auto; border-radius: 8px; }
     .caption-box { background: #030712; border-radius: 14px; padding: 20px; border: 1px solid #1f2937; margin-bottom: 24px; }
     .caption-box h3 { margin: 0 0 10px 0; font-size: 12px; color: #34d399; text-transform: uppercase; letter-spacing: 0.5px; }
     .caption-text { font-size: 13px; line-height: 1.6; color: #e5e7eb; white-space: pre-wrap; margin: 0; }
-    .btn-container { text-align: center; margin: 28px 0; }
-    .btn-approve { display: inline-block; background: #10b981; color: #ffffff !important; text-decoration: none; padding: 16px 36px; border-radius: 12px; font-weight: 800; font-size: 15px; margin: 0 6px 10px 6px; box-shadow: 0 4px 20px rgba(16, 185, 129, 0.5); }
+    
+    /* 3 Action Buttons */
+    .btn-container { text-align: center; margin: 26px 0; }
+    .btn-approve { display: block; background: #10b981; color: #ffffff !important; text-decoration: none; padding: 15px 28px; border-radius: 12px; font-weight: 800; font-size: 14px; margin-bottom: 10px; box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4); text-align: center; }
+    .btn-row { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+    .btn-edit { flex: 1; display: inline-block; background: #2563eb; color: #ffffff !important; text-decoration: none; padding: 12px 18px; border-radius: 10px; font-weight: 700; font-size: 13px; text-align: center; }
+    .btn-reject { flex: 1; display: inline-block; background: #e11d48; color: #ffffff !important; text-decoration: none; padding: 12px 18px; border-radius: 10px; font-weight: 700; font-size: 13px; text-align: center; }
+    
     .reply-instructions { background: rgba(31, 41, 55, 0.6); border-left: 4px solid #10b981; padding: 14px 18px; border-radius: 8px; font-size: 12px; color: #cbd5e1; line-height: 1.6; margin-top: 20px; }
     .footer { text-align: center; padding: 18px; font-size: 11px; color: #6b7280; border-top: 1px solid #1f2937; }
   </style>
@@ -75,10 +81,10 @@ export function generateApprovalEmailHtml(draft, approvalUrl, editUrl, hasInline
   <div class="card">
     <div class="header">
       <h1>🇨🇭 NutriFitness Social Suite</h1>
-      <p>Produit Réel Client : ${productTitle}</p>
+      <p>Nouveau post en attente de votre validation</p>
     </div>
     <div class="body">
-      <div class="badge">⏰ Publication Prévue : ${slotTime} CET • ${theme}</div>
+      <div class="badge">⏰ Créneau Prévu : ${slotTime} CET • ${theme}</div>
       
       <div class="image-container">
         <img src="${mediaUrl}" alt="${productTitle}" />
@@ -90,13 +96,18 @@ export function generateApprovalEmailHtml(draft, approvalUrl, editUrl, hasInline
       </div>
 
       <div class="btn-container">
-        <a href="${approvalUrl}" class="btn-approve">✅ APPROUVER & PROGRAMMER CE POST</a>
+        <a href="${approvalUrl}" class="btn-approve">✅ APPROUVER & PROGRAMMER</a>
+        <div class="btn-row">
+          <a href="${editUrl}" class="btn-edit">✏️ MODIFIER LA LÉGENDE</a>
+          <a href="${rejectUrl}" class="btn-reject">❌ DÉSAPPROUVER / REJETER</a>
+        </div>
       </div>
 
       <div class="reply-instructions">
-        💡 <strong>Vous pouvez également approuver directement par email :</strong><br/>
-        • Répondez simplement <strong>"OUI"</strong> ou <strong>"APPROUVÉ"</strong> à cet email.<br/>
-        • Ou répondez avec vos corrections pour modifier la légende automatiquement.
+        💡 <strong>Vous pouvez également agir directement par email :</strong><br/>
+        • Répondez <strong>"OUI"</strong> pour approuver le post.<br/>
+        • Répondez <strong>"NON"</strong> ou <strong>"REJETÉ"</strong> pour désapprouver.<br/>
+        • Ou répondez avec vos corrections de texte pour modifier la légende.
       </div>
     </div>
     <div class="footer">
@@ -164,26 +175,25 @@ export async function sendApprovalEmailToClient(draftId, clientEmailOverride = n
     throw new Error('Brouillon introuvable');
   }
 
-  // 🔒 HARD SAFETY LOCK CHECK
   let recipientEmail = clientEmailOverride || settings.safetyLock?.supervisorEmail || 'avadhbajaj07@gmail.com';
   
   if (clientEmailOverride === 'marco.scarpantoni@hotmail.com' && !settings.safetyLock?.sendToMarcoAllowed) {
-    addLog('warning', `[VERROU DE SÉCURITÉ ACTIF] L'envoi automatique à Marco est bloqué. Redirigé vers ${settings.safetyLock.supervisorEmail}`);
+    addLog('warning', `[VERROU DE SÉCURITÉ ACTIF] Envoi à Marco bloqué. Redirigé vers ${settings.safetyLock.supervisorEmail}`);
     recipientEmail = settings.safetyLock.supervisorEmail;
   }
 
   const baseUrl = process.env.APP_BASE_URL || 'https://nutrifitness-social-media-desidreams.vercel.app';
-  const frontendUrl = process.env.FRONTEND_URL || 'https://nutrifitness-social-media-desidreams.vercel.app';
 
   const approvalUrl = `${baseUrl}/api/email-approval/approve/${draft.id}?action=approve`;
-  const editUrl = `${frontendUrl}/?tab=approval&draftId=${draft.id}`;
+  const rejectUrl = `${baseUrl}/api/email-approval/approve/${draft.id}?action=reject`;
+  const editUrl = `${baseUrl}/api/email-approval/edit/${draft.id}`;
 
   const sender = getEmailSender();
   const attachment = await getImageAttachment(draft);
-  const htmlContent = generateApprovalEmailHtml(draft, approvalUrl, editUrl, !!attachment);
+  const htmlContent = generateApprovalEmailHtml(draft, approvalUrl, editUrl, rejectUrl, !!attachment);
 
   const fromEmail = process.env.SENDER_EMAIL || settings.email?.senderEmail || 'Hello@avadhbajaj.com';
-  const subject = `🇨🇭 [Validation Requise] Post Produit Réel - ${draft.media?.title || 'NutriFitness'}`;
+  const subject = `🇨🇭 [Validation Requise] Post Instagram & Pinterest - ${draft.media?.title || 'NutriFitness'}`;
 
   if (sender?.type === 'resend') {
     try {
@@ -196,7 +206,7 @@ export async function sendApprovalEmailToClient(draftId, clientEmailOverride = n
       };
 
       const data = await sender.client.emails.send(emailPayload);
-      addLog('success', `Email Resend envoyé avec produit réel à ${recipientEmail}`);
+      addLog('success', `Email Resend envoyé avec boutons Approuver, Modifier et Rejeter à ${recipientEmail}`);
       
       updateDraft(draftId, {
         emailSentTo: recipientEmail,
@@ -215,6 +225,7 @@ export async function sendApprovalEmailToClient(draftId, clientEmailOverride = n
     recipient: recipientEmail,
     approvalUrl,
     editUrl,
+    rejectUrl,
     subject,
     html: htmlContent
   };
@@ -231,6 +242,28 @@ export function processClientEmailReply(draftId, replyBody = '') {
   const cleanedBody = replyBody.trim();
   const lower = cleanedBody.toLowerCase();
 
+  // Disapproval keywords
+  const rejectKeywords = ['non', 'no', 'refuse', 'refusé', 'rejet', 'rejeté', 'reject', 'disapprove', 'annule', 'annulé', 'stop'];
+  const isDirectReject = rejectKeywords.some(k => lower === k || lower.startsWith(k + ' ') || lower.startsWith(k + '!') || lower.startsWith(k + '.'));
+
+  if (isDirectReject) {
+    const updated = updateDraft(draftId, {
+      status: 'REJECTED',
+      rejectedAt: new Date().toISOString(),
+      rejectedVia: 'EMAIL_REPLY_REJECTION',
+      clientFeedback: `Rejeté par email : "${cleanedBody}"`
+    });
+
+    addLog('warning', `Post (${draftId}) REJETÉ par réponse email ("${cleanedBody}"). Statut: REJECTED ❌`);
+    return {
+      success: true,
+      action: 'REJECTED',
+      draft: updated,
+      message: 'Post rejeté avec succès par email.'
+    };
+  }
+
+  // Approval keywords
   const approvalKeywords = ['oui', 'ok', 'yes', 'validé', 'valide', 'approuve', 'approuvé', 'approved', 'go', 'top', 'parfait', 'nickel'];
   const isDirectApproval = approvalKeywords.some(k => lower === k || lower.startsWith(k + ' ') || lower.startsWith(k + '!') || lower.startsWith(k + '.'));
 
@@ -242,7 +275,7 @@ export function processClientEmailReply(draftId, replyBody = '') {
       clientFeedback: `Approuvé par email : "${cleanedBody}"`
     });
 
-    addLog('success', `Superviseur/Client (${draft.emailSentTo || 'user'}) a validé le post (${draftId}) ! Status: APPROVED ✅`);
+    addLog('success', `Post (${draftId}) validé par email ! Status: APPROVED ✅`);
     return {
       success: true,
       action: 'APPROVED_DIRECT',
