@@ -1,6 +1,7 @@
 {
   "name": "nutrifitness-social-media",
   "version": "1.0.0",
+  "type": "module",
   "description": "Plateforme d'automatisation sociale NutriFitness pour Instagram & Pinterest avec Cloudinary et Blotato API",
   "scripts": {
     "dev": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
@@ -8,10 +9,29 @@
     "install:all": "npm install && npm install --prefix backend && npm install --prefix frontend",
     "build": "npm run build --prefix frontend"
   },
+  "dependencies": {
+    "axios": "^1.8.1",
+    "cloudinary": "^2.5.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.10.0",
+    "uuid": "^11.1.0"
+  },
   "devDependencies": {
     "concurrently": "^9.1.2"
   },
-  "keywords": ["instagram", "pinterest", "automation", "cloudinary", "blotato", "switzerland", "fitness", "nutrition"],
+  "keywords": [
+    "instagram",
+    "pinterest",
+    "automation",
+    "cloudinary",
+    "blotato",
+    "switzerland",
+    "fitness",
+    "nutrition"
+  ],
   "author": "NutriFitness Automation",
   "license": "MIT"
 }
