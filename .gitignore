@@ -19,3 +19,5 @@ backend/data/*.json
 
 # Vercel
 .vercel
+.env*
+!.env.example

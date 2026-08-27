@@ -24,7 +24,8 @@ export function getLocalClientMedia() {
         return {
           public_id: `local/nutrifitness/${file}`,
           filename: file,
-          secure_url: `http://localhost:5001/local-media/${encodeURIComponent(file)}`,
+          // A relative URL works in local development and after deployment.
+          secure_url: `/api/local-media/${encodeURIComponent(file)}`,
           format: ext,
           resource_type: 'image',
           aspect_ratio: '4:5 (Portrait Idéal)',

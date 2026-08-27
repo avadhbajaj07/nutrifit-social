@@ -27,6 +27,8 @@ app.use(express.urlencoded({ extended: true }));
 // Serve real client products from /products folder
 app.use('/products-media', express.static(PRODUCTS_MEDIA_PATH));
 app.use('/local-media', express.static(LOCAL_MEDIA_PATH));
+app.use('/api/products-media', express.static(PRODUCTS_MEDIA_PATH));
+app.use('/api/local-media', express.static(LOCAL_MEDIA_PATH));
 
 // API Endpoints
 app.use('/api/media', mediaRoutes);

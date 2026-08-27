@@ -1,7 +1,7 @@
 import express from 'express';
 import { getClientProductsList } from '../services/clientProductsService.js';
-import { getLocalMediaList } from '../services/localMediaService.js';
-import { fetchCloudinaryMedia, deleteMediaFromCloudinary } from '../services/cloudinaryService.js';
+import { getLocalClientMedia } from '../services/localMediaService.js';
+import { listMediaFromFolder, deleteMedia } from '../services/cloudinaryService.js';
 
 const router = express.Router();
 
@@ -23,11 +23,11 @@ router.get('/products', (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const products = getClientProductsList();
-    const localMedia = getLocalMediaList();
+    const localMedia = getLocalClientMedia();
 
     let cloudinaryMedia = [];
     try {
-      cloudinaryMedia = await fetchCloudinaryMedia();
+      cloudinaryMedia = (await listMediaFromFolder()).resources || [];
     } catch (e) {}
 
     const all = [...products, ...localMedia, ...cloudinaryMedia];
@@ -48,7 +48,7 @@ router.get('/', async (req, res) => {
 router.delete('/:publicId', async (req, res) => {
   try {
     const { publicId } = req.params;
-    const result = await deleteMediaFromCloudinary(publicId);
+    const result = await deleteMedia(publicId, req.query.resourceType || 'image');
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

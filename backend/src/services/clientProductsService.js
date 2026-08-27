@@ -24,7 +24,7 @@ export function getClientProductsList() {
       return {
         filename: file,
         title: cleanTitle,
-        secure_url: `/products-media/${encodeURIComponent(file)}`,
+        secure_url: `/api/products-media/${encodeURIComponent(file)}`,
         fullLocalPath: path.join(PRODUCTS_DIR, file),
         category: getProductCategory(file),
         aspect_ratio: '1:1',
