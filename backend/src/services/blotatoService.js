@@ -2,228 +2,246 @@ import axios from 'axios';
 import { getSettings, addLog } from './storageService.js';
 
 const BLOTATO_BASE_URL = 'https://backend.blotato.com/v2';
+const REQUEST_TIMEOUT = 25000;
+
+const getApiKey = customApiKey => customApiKey || getSettings().blotato.apiKey;
+const headersFor = apiKey => ({
+  'blotato-api-key': apiKey,
+  'Content-Type': 'application/json'
+});
+const apiError = error => {
+  const detail = error.response?.data?.message || error.response?.data?.error || error.message;
+  const wrapped = new Error(detail);
+  wrapped.status = error.response?.status || 500;
+  return wrapped;
+};
+const normalizeItems = data => data?.items || data?.accounts || (Array.isArray(data) ? data : []);
+
+const mockAccounts = [
+  {
+    id: 'acc_insta_demo_01',
+    fullname: 'NutriFitness Romandie',
+    name: 'NutriFitness Romandie',
+    platform: 'instagram',
+    username: 'nutrifitness.ch'
+  },
+  {
+    id: 'acc_pin_demo_02',
+    fullname: 'NutriFitness Suisse',
+    name: 'NutriFitness Suisse',
+    platform: 'pinterest',
+    username: 'nutrifitness_ch'
+  }
+];
+
+export async function getBlotatoUser(customApiKey = null) {
+  const apiKey = getApiKey(customApiKey);
+  if (!apiKey) return { connected: false, isMock: true, user: null };
+
+  try {
+    const response = await axios.get(`${BLOTATO_BASE_URL}/users/me`, {
+      headers: headersFor(apiKey), timeout: 10000
+    });
+    return { connected: true, isMock: false, user: response.data };
+  } catch (error) {
+    throw apiError(error);
+  }
+}
 
 export async function testBlotatoConnection(customApiKey = null) {
-  const settings = getSettings();
-  const apiKey = customApiKey || settings.blotato.apiKey;
-
+  const apiKey = getApiKey(customApiKey);
   if (!apiKey) {
     return {
       connected: false,
-      message: 'Clé API Blotato non configurée. Utilisez les paramètres pour saisir votre clé.'
+      isMock: true,
+      message: 'Blotato API key is not configured. Preview accounts are shown locally.',
+      accounts: mockAccounts
     };
   }
 
   try {
     const response = await axios.get(`${BLOTATO_BASE_URL}/users/me/accounts`, {
-      headers: {
-        'blotato-api-key': apiKey,
-        'Content-Type': 'application/json'
-      },
-      timeout: 10000
+      headers: headersFor(apiKey), timeout: 10000
     });
-
     return {
       connected: true,
-      message: 'Connexion API Blotato établie avec succès !',
-      accounts: response.data
+      isMock: false,
+      message: 'Blotato connection is active.',
+      accounts: normalizeItems(response.data)
     };
   } catch (error) {
-    const errorDetail = error.response?.data?.message || error.message;
-    return {
-      connected: false,
-      message: `Échec de connexion Blotato : ${errorDetail}`
-    };
+    const detail = apiError(error).message;
+    return { connected: false, isMock: false, message: `Blotato connection failed: ${detail}`, accounts: [] };
   }
 }
 
-export async function getBlotatoAccounts(customApiKey = null) {
-  const settings = getSettings();
-  const apiKey = customApiKey || settings.blotato.apiKey;
-
+export async function getBlotatoAccounts(customApiKey = null, platform = '') {
+  const apiKey = getApiKey(customApiKey);
   if (!apiKey) {
-    // Return sample mock accounts for testing & UI preview
-    return {
-      isMock: true,
-      accounts: [
-        {
-          id: 'acc_insta_demo_01',
-          name: 'NutriFitness Romandie (Instagram)',
-          platform: 'instagram',
-          username: 'nutrifitness.ch',
-          connected: true,
-          type: 'BUSINESS'
-        },
-        {
-          id: 'acc_pin_demo_02',
-          name: 'NutriFitness Suisse (Pinterest)',
-          platform: 'pinterest',
-          username: 'nutrifitness_ch',
-          connected: true,
-          type: 'BOARD'
-        }
-      ]
-    };
+    const accounts = platform ? mockAccounts.filter(account => account.platform === platform) : mockAccounts;
+    return { isMock: true, accounts };
   }
 
   try {
     const response = await axios.get(`${BLOTATO_BASE_URL}/users/me/accounts`, {
-      headers: {
-        'blotato-api-key': apiKey
-      },
-      timeout: 10000
+      params: platform ? { platform } : undefined,
+      headers: headersFor(apiKey), timeout: 10000
     });
-
-    return {
-      isMock: false,
-      accounts: response.data?.accounts || response.data || []
-    };
+    return { isMock: false, accounts: normalizeItems(response.data) };
   } catch (error) {
-    addLog('error', `Erreur lors de la récupération des comptes Blotato : ${error.message}`);
-    throw error;
+    addLog('error', `Could not load Blotato accounts: ${error.message}`);
+    throw apiError(error);
   }
 }
 
-/**
- * Publish post to Instagram & Pinterest via Blotato API
- * Follows strict Instagram & Pinterest parameters and ensures no raw links in captions
- */
+export async function getBlotatoSubaccounts(accountId, customApiKey = null) {
+  const apiKey = getApiKey(customApiKey);
+  if (!apiKey) return { isMock: true, subaccounts: [] };
+
+  try {
+    const response = await axios.get(`${BLOTATO_BASE_URL}/users/me/accounts/${encodeURIComponent(accountId)}/subaccounts`, {
+      headers: headersFor(apiKey), timeout: 10000
+    });
+    return { isMock: false, subaccounts: normalizeItems(response.data) };
+  } catch (error) {
+    throw apiError(error);
+  }
+}
+
+export async function uploadBlotatoMedia(url, customApiKey = null) {
+  const apiKey = getApiKey(customApiKey);
+  if (!url) throw new Error('A public media URL is required.');
+  if (!apiKey) return { isMock: true, url };
+
+  try {
+    const response = await axios.post(`${BLOTATO_BASE_URL}/media`, { url }, {
+      headers: headersFor(apiKey), timeout: 60000
+    });
+    return { isMock: false, ...response.data };
+  } catch (error) {
+    throw apiError(error);
+  }
+}
+
+export async function createBlotatoPost({
+  accountId,
+  platform,
+  text = '',
+  mediaUrls = [],
+  target = {},
+  scheduledTime = null,
+  useNextFreeSlot = false,
+  additionalPosts = []
+}, customApiKey = null) {
+  const apiKey = getApiKey(customApiKey);
+  if (!accountId) throw new Error('Select a connected Blotato account.');
+  if (!platform) throw new Error('A target platform is required.');
+
+  const payload = {
+    post: {
+      accountId,
+      content: {
+        text,
+        mediaUrls: mediaUrls.filter(Boolean),
+        platform,
+        ...(additionalPosts.length ? { additionalPosts } : {})
+      },
+      target: { ...target, targetType: platform }
+    },
+    ...(scheduledTime ? { scheduledTime } : {}),
+    ...(!scheduledTime && useNextFreeSlot ? { useNextFreeSlot: true } : {})
+  };
+
+  if (!apiKey) {
+    return {
+      isMock: true,
+      postSubmissionId: `demo_${platform}_${Date.now().toString(36)}`,
+      status: scheduledTime || useNextFreeSlot ? 'scheduled' : 'in-progress',
+      payload
+    };
+  }
+
+  try {
+    const response = await axios.post(`${BLOTATO_BASE_URL}/posts`, payload, {
+      headers: headersFor(apiKey), timeout: REQUEST_TIMEOUT
+    });
+    const postSubmissionId = response.data?.postSubmissionId || response.data?.id;
+    addLog('success', `${platform} post sent to Blotato (${postSubmissionId || 'queued'}).`);
+    return { isMock: false, ...response.data, postSubmissionId, payload };
+  } catch (error) {
+    addLog('error', `Blotato ${platform} publish failed: ${apiError(error).message}`);
+    throw apiError(error);
+  }
+}
+
+export async function getBlotatoPostStatus(postSubmissionId, customApiKey = null) {
+  const apiKey = getApiKey(customApiKey);
+  if (!postSubmissionId) throw new Error('A Blotato post submission ID is required.');
+  if (!apiKey || postSubmissionId.startsWith('demo_')) {
+    return { isMock: true, postSubmissionId, status: 'published', publicUrl: '' };
+  }
+
+  try {
+    const response = await axios.get(`${BLOTATO_BASE_URL}/posts/${encodeURIComponent(postSubmissionId)}`, {
+      headers: headersFor(apiKey), timeout: 10000
+    });
+    return { isMock: false, ...response.data };
+  } catch (error) {
+    throw apiError(error);
+  }
+}
+
+/** Backward-compatible Instagram + Pinterest publisher used by the scheduler. */
 export async function publishToPlatforms({
   mediaUrl,
   captionInstagram,
   captionPinterest,
   pinterestTitle = 'NutriFitness Suisse - Conseils & Motivation',
   platforms = { instagram: true, pinterest: true },
-  resourceType = 'image'
+  scheduledTime = null,
+  useNextFreeSlot = false
 }) {
   const settings = getSettings();
-  const apiKey = settings.blotato.apiKey;
-  const accountId = settings.blotato.accountId;
+  const results = { instagram: null, pinterest: null, errors: [], isMock: !settings.blotato.apiKey };
 
-  const results = {
-    instagram: null,
-    pinterest: null,
-    errors: [],
-    isMock: false
-  };
-
-  // If no API key configured, simulate publication for sandbox testing
-  if (!apiKey || !accountId) {
-    results.isMock = true;
-    const mockPostId = 'sim_' + Date.now().toString(36);
-
-    if (platforms.instagram) {
-      results.instagram = {
-        success: true,
-        postSubmissionId: `ig_${mockPostId}`,
-        platform: 'instagram',
-        status: 'PUBLISHED_SIMULATED',
-        timestamp: new Date().toISOString()
-      };
-      addLog('success', `[Simulation] Post Instagram publié avec succès via Blotato API (ID: ig_${mockPostId})`);
-    }
-
-    if (platforms.pinterest) {
-      results.pinterest = {
-        success: true,
-        postSubmissionId: `pin_${mockPostId}`,
-        platform: 'pinterest',
-        status: 'PUBLISHED_SIMULATED',
-        timestamp: new Date().toISOString()
-      };
-      addLog('success', `[Simulation] Épingle Pinterest publiée avec succès via Blotato API (ID: pin_${mockPostId})`);
-    }
-
-    return results;
-  }
-
-  // 1. Post to Instagram
   if (platforms.instagram) {
     try {
-      const igPayload = {
-        post: {
-          accountId: settings.blotato.instagramSubaccountId || accountId,
-          content: {
-            text: captionInstagram,
-            mediaUrls: [mediaUrl],
-            platform: 'instagram'
-          },
-          target: {
-            targetType: 'instagram'
-          }
-        }
-      };
-
-      const response = await axios.post(`${BLOTATO_BASE_URL}/posts`, igPayload, {
-        headers: {
-          'blotato-api-key': apiKey,
-          'Content-Type': 'application/json'
-        },
-        timeout: 25000
-      });
-
       results.instagram = {
         success: true,
-        postSubmissionId: response.data?.postSubmissionId || response.data?.id || 'blotato_ig_ok',
-        data: response.data,
-        platform: 'instagram'
+        platform: 'instagram',
+        ...(await createBlotatoPost({
+          accountId: settings.blotato.instagramSubaccountId || settings.blotato.accountId || mockAccounts[0].id,
+          platform: 'instagram',
+          text: captionInstagram,
+          mediaUrls: [mediaUrl],
+          scheduledTime,
+          useNextFreeSlot
+        }))
       };
-      addLog('success', `Post Instagram envoyé à Blotato API avec succès (${results.instagram.postSubmissionId})`);
     } catch (error) {
-      const errMsg = error.response?.data?.message || error.message;
-      results.errors.push(`Instagram: ${errMsg}`);
-      results.instagram = {
-        success: false,
-        error: errMsg,
-        platform: 'instagram'
-      };
-      addLog('error', `Erreur de publication Instagram Blotato : ${errMsg}`);
+      results.errors.push(`Instagram: ${error.message}`);
+      results.instagram = { success: false, platform: 'instagram', error: error.message };
     }
   }
 
-  // 2. Post to Pinterest
   if (platforms.pinterest) {
     try {
-      const pinPayload = {
-        post: {
-          accountId: settings.blotato.pinterestSubaccountId || accountId,
-          content: {
-            text: captionPinterest || captionInstagram,
-            title: pinterestTitle,
-            mediaUrls: [mediaUrl],
-            platform: 'pinterest',
-            ...(settings.blotato.pinterestBoardId ? { boardId: settings.blotato.pinterestBoardId } : {})
-          },
-          target: {
-            targetType: 'pinterest'
-          }
-        }
-      };
-
-      const response = await axios.post(`${BLOTATO_BASE_URL}/posts`, pinPayload, {
-        headers: {
-          'blotato-api-key': apiKey,
-          'Content-Type': 'application/json'
-        },
-        timeout: 25000
-      });
-
       results.pinterest = {
         success: true,
-        postSubmissionId: response.data?.postSubmissionId || response.data?.id || 'blotato_pin_ok',
-        data: response.data,
-        platform: 'pinterest'
+        platform: 'pinterest',
+        ...(await createBlotatoPost({
+          accountId: settings.blotato.pinterestSubaccountId || settings.blotato.accountId || mockAccounts[1].id,
+          platform: 'pinterest',
+          text: captionPinterest || captionInstagram,
+          mediaUrls: [mediaUrl],
+          target: { boardId: settings.blotato.pinterestBoardId, title: pinterestTitle },
+          scheduledTime,
+          useNextFreeSlot
+        }))
       };
-      addLog('success', `Épingle Pinterest envoyée à Blotato API avec succès (${results.pinterest.postSubmissionId})`);
     } catch (error) {
-      const errMsg = error.response?.data?.message || error.message;
-      results.errors.push(`Pinterest: ${errMsg}`);
-      results.pinterest = {
-        success: false,
-        error: errMsg,
-        platform: 'pinterest'
-      };
-      addLog('error', `Erreur de publication Pinterest Blotato : ${errMsg}`);
+      results.errors.push(`Pinterest: ${error.message}`);
+      results.pinterest = { success: false, platform: 'pinterest', error: error.message };
     }
   }
 

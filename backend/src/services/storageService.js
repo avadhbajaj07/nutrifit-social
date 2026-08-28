@@ -37,7 +37,8 @@ const DEFAULT_DATA = {
       apiKey: process.env.BLOTATO_API_KEY || '',
       accountId: process.env.BLOTATO_ACCOUNT_ID || '',
       instagramSubaccountId: process.env.BLOTATO_IG_SUBACCOUNT_ID || '',
-      pinterestSubaccountId: process.env.BLOTATO_PIN_SUBACCOUNT_ID || ''
+      pinterestSubaccountId: process.env.BLOTATO_PIN_SUBACCOUNT_ID || '',
+      pinterestBoardId: process.env.BLOTATO_PIN_BOARD_ID || ''
     },
     scheduling: {
       enabled: false, // Disabled until you approve
@@ -110,7 +111,15 @@ export function loadStore() {
           ...parsed.settings,
           safetyLock: { ...DEFAULT_DATA.settings.safetyLock, ...(parsed.settings?.safetyLock || {}) },
           email: { ...DEFAULT_DATA.settings.email, ...(parsed.settings?.email || {}) },
-          clientPortal: { ...DEFAULT_DATA.settings.clientPortal, ...(parsed.settings?.clientPortal || {}) }
+          clientPortal: { ...DEFAULT_DATA.settings.clientPortal, ...(parsed.settings?.clientPortal || {}) },
+          cloudinary: { ...DEFAULT_DATA.settings.cloudinary, ...(parsed.settings?.cloudinary || {}) },
+          blotato: { ...DEFAULT_DATA.settings.blotato, ...(parsed.settings?.blotato || {}) },
+          scheduling: {
+            ...DEFAULT_DATA.settings.scheduling,
+            ...(parsed.settings?.scheduling || {}),
+            enabled: false,
+            autoDeleteMediaOnSuccess: false
+          }
         },
         drafts,
         postsHistory: parsed.postsHistory || [],
@@ -149,7 +158,15 @@ export function updateSettings(newSettings) {
     ...newSettings,
     safetyLock: { ...store.settings.safetyLock, ...(newSettings.safetyLock || {}) },
     email: { ...store.settings.email, ...(newSettings.email || {}) },
-    clientPortal: { ...store.settings.clientPortal, ...(newSettings.clientPortal || {}) }
+    clientPortal: { ...store.settings.clientPortal, ...(newSettings.clientPortal || {}) },
+    cloudinary: { ...store.settings.cloudinary, ...(newSettings.cloudinary || {}) },
+    blotato: { ...store.settings.blotato, ...(newSettings.blotato || {}) },
+    scheduling: {
+      ...store.settings.scheduling,
+      ...(newSettings.scheduling || {}),
+      enabled: false,
+      autoDeleteMediaOnSuccess: false
+    }
   };
   saveStore(store);
   return store.settings;

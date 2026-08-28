@@ -10,6 +10,7 @@ import draftsRoutes from './routes/drafts.js';
 import emailApprovalRoutes from './routes/emailApproval.js';
 import aiRoutes from './routes/ai.js';
 import settingsRoutes from './routes/settings.js';
+import blotatoRoutes from './routes/blotato.js';
 
 dotenv.config();
 
@@ -37,6 +38,7 @@ app.use('/api/drafts', draftsRoutes);
 app.use('/api/email-approval', emailApprovalRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/blotato', blotatoRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

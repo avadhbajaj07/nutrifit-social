@@ -1,8 +1,8 @@
 import express from 'express';
 import { getDrafts, createDraft, updateDraft, deleteDraft, addLog, getSettings, addPostHistory } from '../services/storageService.js';
-import { listMediaFromFolder, deleteMedia } from '../services/cloudinaryService.js';
+import { listMediaFromFolder } from '../services/cloudinaryService.js';
 import { generateViralPostContent } from '../services/aiCaptionService.js';
-import { publishToPlatforms } from '../services/blotatoService.js';
+import { createBlotatoPost, getBlotatoPostStatus, publishToPlatforms, uploadBlotatoMedia } from '../services/blotatoService.js';
 
 const router = express.Router();
 const canAccessClientPortal = req => {
@@ -127,13 +127,80 @@ router.post('/:id/publish-now', async (req, res) => {
       captionPinterest: draft.captions.pinterestDescription, pinterestTitle: draft.captions.pinterestTitle,
       platforms: { instagram: settings.scheduling.postToInstagram !== false, pinterest: settings.scheduling.postToPinterest !== false }, resourceType: draft.media?.resource_type || 'image' });
     const successful = (publishResult.instagram?.success || !settings.scheduling.postToInstagram) && (publishResult.pinterest?.success || !settings.scheduling.postToPinterest);
-    let deletion = null;
-    // Legacy opt-in only: by default files remain for audit and reuse.
-    if (successful && settings.scheduling.autoDeleteMediaOnSuccess && draft.media?.public_id) deletion = await deleteMedia(draft.media.public_id, draft.media.resource_type || 'image');
     updateDraft(draft.id, addRevision(draft, 'PUBLISHED', 'Published to selected channels.', { status: 'POSTED', publishedAt: new Date().toISOString() }));
-    addPostHistory({ draftId: draft.id, media: draft.media, captions: draft.captions, platforms: publishResult, autoDeleted: deletion?.success || false, status: successful ? 'COMPLETED' : 'FAILED' });
-    res.json({ success: successful, publishResult, deletion });
+    addPostHistory({ draftId: draft.id, media: draft.media, captions: draft.captions, platforms: publishResult, autoDeleted: false, status: successful ? 'COMPLETED' : 'FAILED' });
+    res.json({ success: successful, publishResult });
   } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+// Send one approved post to any social account connected in Blotato.
+router.post('/:id/blotato-publication', async (req, res) => {
+  try {
+    const draft = getDrafts().find(item => item.id === req.params.id);
+    if (!draft) return res.status(404).json({ error: 'Post not found' });
+    if (!['APPROVED', 'SCHEDULED', 'PUBLISH_FAILED'].includes(draft.status)) {
+      return res.status(409).json({ error: 'Only approved posts can be sent to Blotato.' });
+    }
+
+    const {
+      accountId, platform, target = {}, scheduledTime = null, useNextFreeSlot = false,
+      additionalPosts = [], relayMedia = false, text = ''
+    } = req.body;
+    let mediaUrl = draft.media?.secure_url;
+    if (!mediaUrl) return res.status(400).json({ error: 'This post does not have a public media URL.' });
+    if (relayMedia) mediaUrl = (await uploadBlotatoMedia(mediaUrl)).url || mediaUrl;
+
+    const publication = await createBlotatoPost({
+      accountId,
+      platform,
+      text: text || draft.captions?.instagramCaption || '',
+      mediaUrls: [mediaUrl],
+      target,
+      scheduledTime,
+      useNextFreeSlot,
+      additionalPosts
+    });
+    const nextStatus = scheduledTime || useNextFreeSlot ? 'SCHEDULED' : 'PUBLISHING';
+    const updated = updateDraft(draft.id, addRevision(draft, nextStatus, `Sent to ${platform} through Blotato.`, {
+      status: nextStatus,
+      scheduledFor: scheduledTime || draft.scheduledFor,
+      blotatoPublication: {
+        ...publication,
+        accountId,
+        platform,
+        target,
+        submittedAt: new Date().toISOString()
+      }
+    }));
+    addLog('success', `Draft ${draft.id} sent to ${platform} through Blotato.`);
+    res.status(201).json({ success: true, draft: updated, publication });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
+});
+
+router.get('/:id/blotato-publication', async (req, res) => {
+  try {
+    const draft = getDrafts().find(item => item.id === req.params.id);
+    if (!draft) return res.status(404).json({ error: 'Post not found' });
+    const submissionId = draft.blotatoPublication?.postSubmissionId;
+    if (!submissionId) return res.status(404).json({ error: 'No Blotato submission is attached to this post.' });
+
+    const publication = await getBlotatoPostStatus(submissionId);
+    const statusMap = { published: 'POSTED', failed: 'PUBLISH_FAILED', scheduled: 'SCHEDULED', 'in-progress': 'PUBLISHING' };
+    const nextStatus = statusMap[publication.status] || draft.status;
+    let updates = {
+      status: nextStatus,
+      blotatoPublication: { ...draft.blotatoPublication, ...publication, checkedAt: new Date().toISOString() }
+    };
+    if (nextStatus !== draft.status) {
+      const note = publication.errorMessage || publication.publicUrl || `Blotato status: ${publication.status}`;
+      updates = addRevision(draft, `BLOTATO_${publication.status.toUpperCase().replace('-', '_')}`, note, {
+        ...updates,
+        ...(nextStatus === 'POSTED' ? { publishedAt: new Date().toISOString() } : {})
+      });
+    }
+    const updated = updateDraft(draft.id, updates);
+    res.json({ success: true, draft: updated, publication });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
 });
 
 router.delete('/:id', (req, res) => {

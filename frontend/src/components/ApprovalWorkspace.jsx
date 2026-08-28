@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle, CalendarDays, Check, CheckCircle2, ChevronRight, Clock3, Copy,
   Image as ImageIcon, Layers3, Link, Package, Pencil, Plus, RefreshCw, Send, X, XCircle
 } from 'lucide-react';
+import BlotatoPanel from './BlotatoPanel';
 
 const STATUS = {
   PENDING_REVIEW: { label: 'Waiting for client', tone: 'amber' },
   PRODUCT_CHANGE_REQUESTED: { label: 'Product change requested', tone: 'violet' },
   APPROVED: { label: 'Approved', tone: 'emerald' },
   REJECTED: { label: 'Rejected', tone: 'rose' },
+  SCHEDULED: { label: 'Scheduled', tone: 'sky' },
+  PUBLISHING: { label: 'Publishing', tone: 'sky' },
+  PUBLISH_FAILED: { label: 'Publish failed', tone: 'rose' },
   POSTED: { label: 'Posted', tone: 'sky' }
 };
 
@@ -60,14 +64,14 @@ function ClientActions({ draft, onRespond, working }) {
 
   if (draft.status !== 'PENDING_REVIEW') return <div className="client-result"><Pill status={draft.status} />{draft.productRequest && <p>{draft.productRequest}</p>}</div>;
   return <section className="review-actions">
-    <p className="small-label">Your decision</p>
-    <div className="date-field"><CalendarDays size={16} /><label>Preferred posting date — Geneva time <input type="datetime-local" value={date} onChange={e => setDate(e.target.value)} /></label></div>
-    <button className="action primary" disabled={working} onClick={() => send('approve')}><CheckCircle2 size={17} /> Yes, I approve this</button>
-    <button className="action" onClick={() => setPanel(panel === 'product' ? null : 'product')}><Package size={17} /> Design is good, change product</button>
+    <p className="small-label">Choose one response</p>
+    <div className="date-field"><CalendarDays size={16} /><label>Preferred publishing time · Geneva <input type="datetime-local" value={date} onChange={e => setDate(e.target.value)} /></label></div>
+    <button className="action primary" disabled={working} onClick={() => send('approve')}><CheckCircle2 size={17} /> Approve</button>
+    <button className="action" onClick={() => setPanel(panel === 'product' ? null : 'product')}><Package size={17} /> Keep design, change product</button>
     {panel === 'product' && <div className="inline-form"><input autoFocus value={product} onChange={e => setProduct(e.target.value)} placeholder="Which product should be shown?" /><button disabled={working || !product.trim()} onClick={() => send('product_change', { productRequest: product })}>Send request</button></div>}
-    <button className="action" onClick={() => setPanel(panel === 'caption' ? null : 'caption')}><Pencil size={17} /> Design is good, edit caption</button>
+    <button className="action" onClick={() => setPanel(panel === 'caption' ? null : 'caption')}><Pencil size={17} /> Edit caption & approve</button>
     {panel === 'caption' && <div className="inline-form stacked"><textarea value={caption} onChange={e => setCaption(e.target.value)} rows="7" /><button disabled={working || !caption.trim()} onClick={() => send('caption_approve', { caption })}><Check size={16} /> Save caption & approve</button></div>}
-    <button className="action reject" onClick={() => setPanel(panel === 'reject' ? null : 'reject')}><XCircle size={17} /> I don’t like this design</button>
+    <button className="action reject" onClick={() => setPanel(panel === 'reject' ? null : 'reject')}><XCircle size={17} /> Reject design</button>
     {panel === 'reject' && <div className="inline-form"><input autoFocus value={note} onChange={e => setNote(e.target.value)} placeholder="Optional reason (helps the creator)" /><button className="danger" disabled={working} onClick={() => send('reject', { note })}>Reject design</button></div>}
   </section>;
 }
@@ -78,13 +82,13 @@ function ClientPortal({ drafts, onRespond, loading, notice }) {
   useEffect(() => { if (!currentId && reviewable[0]) setCurrentId(reviewable[0].id); }, [currentId, reviewable]);
   const current = drafts.find(item => item.id === currentId) || reviewable[0];
   return <main className="client-page">
-    <header className="client-header"><div className="brand-mark">N</div><div><p className="eyebrow">NUTRIFITNESS</p><h1>Content review</h1></div><span className="round-chip">{reviewable.length} awaiting your review</span></header>
+    <header className="client-header"><div className="brand-mark">N</div><div><p className="eyebrow">NUTRIFITNESS</p><h1>Review posts</h1></div><span className="round-chip">{reviewable.length} waiting</span></header>
     {notice && <div className="notice success"><CheckCircle2 size={17} />{notice}</div>}
     {loading ? <div className="empty-card">Loading your posts…</div> : current ? <>
-      <div className="client-switcher">{drafts.map(post => <button key={post.id} onClick={() => setCurrentId(post.id)} className={current.id === post.id ? 'active' : ''}>Post {post.revision || 1} <Pill status={post.status} /></button>)}</div>
+      <div className="client-switcher">{drafts.map((post, index) => <button key={post.id} onClick={() => setCurrentId(post.id)} className={current.id === post.id ? 'active' : ''}>Post {index + 1} <Pill status={post.status} /></button>)}</div>
       <article className="client-card">
         <div className="image-frame"><img src={current.media?.secure_url} alt="Post awaiting review" /></div>
-        <div className="client-copy"><div className="card-heading"><div><p className="eyebrow">POST REVISION {current.revision || 1}</p><h2>Review this post</h2></div><Pill status={current.status} /></div>
+        <div className="client-copy"><div className="card-heading"><div><p className="eyebrow">REVISION {current.revision || 1}</p><h2>Does this work?</h2></div><Pill status={current.status} /></div>
           <p className="caption-copy">{current.captions?.instagramCaption}</p>
           {current.scheduledFor && <p className="schedule-line"><Clock3 size={16} /> Posting date: {prettyDate(current.scheduledFor)}</p>}
           <ClientActions draft={current} onRespond={onRespond} working={loading} />
@@ -101,7 +105,7 @@ function Composer({ media, initial, onSave, onClose, working }) {
   const [date, setDate] = useState(dateValue(initial?.scheduledFor));
   const [showPicker, setShowPicker] = useState(!initial);
   const submit = () => onSave({ media: selected, captions: { ...initial?.captions, instagramCaption: caption }, scheduledFor: genevaDateToIso(date) });
-  return <div className="modal-backdrop"><section className="composer modal-card"><button className="icon-button close" onClick={onClose}><X size={19} /></button><p className="eyebrow">{initial ? 'REWORK REQUEST' : 'NEW POST'}</p><h2>{initial ? 'Update and resubmit post' : 'Create a post for client approval'}</h2>
+  return <div className="modal-backdrop"><section className="composer modal-card" role="dialog" aria-modal="true" aria-label={initial ? 'Update and resubmit post' : 'Create a post'}><button className="icon-button close" aria-label="Close post editor" onClick={onClose}><X size={19} /></button><p className="eyebrow">{initial ? 'REWORK REQUEST' : 'NEW POST'}</p><h2>{initial ? 'Update and resubmit post' : 'Create a post for client approval'}</h2>
     <div className="composer-layout"><div><button className="media-preview" onClick={() => setShowPicker(!showPicker)}>{selected?.secure_url ? <img src={selected.secure_url} alt="Selected media" /> : <ImageIcon />}<span>Choose image</span></button>
       {showPicker && <div className="media-picker">{media.map((item, index) => <button className={selected?.public_id === item.public_id ? 'selected' : ''} onClick={() => { setSelected(item); setShowPicker(false); }} key={`${item.public_id}-${index}`}><img src={item.secure_url} alt="Available media" /></button>)}</div>}</div>
       <div className="form-stack"><label>Caption<textarea rows="9" value={caption} onChange={e => setCaption(e.target.value)} placeholder="Write the caption for the client…" /></label><label>Posting date — Geneva time (optional)<input type="datetime-local" value={date} onChange={e => setDate(e.target.value)} /></label>
@@ -109,10 +113,11 @@ function Composer({ media, initial, onSave, onClose, working }) {
     </div></section></div>;
 }
 
-function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink }) {
+function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink, onDraftUpdated }) {
   const [filter, setFilter] = useState('ALL');
   const [selectedId, setSelectedId] = useState('');
   const [composer, setComposer] = useState(null);
+  const [publisher, setPublisher] = useState(null);
   const filtered = useMemo(() => filter === 'ALL' ? drafts : drafts.filter(draft => draft.status === filter), [drafts, filter]);
   useEffect(() => { if (!selectedId && filtered[0]) setSelectedId(filtered[0].id); }, [selectedId, filtered]);
   const selected = drafts.find(draft => draft.id === selectedId) || filtered[0];
@@ -127,15 +132,16 @@ function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink }) {
     setComposer(null); await refresh('Updated post sent back for a new client review.');
   };
   const copyLink = async () => { await navigator.clipboard?.writeText(clientLink); refresh('Private client review link copied.'); };
-  return <main className="owner-page"><header className="owner-header"><div><p className="eyebrow">NUTRIFITNESS • CREATOR SPACE</p><h1>Approval board</h1><p>Every client decision is stored as a visible review event.</p></div><div className="header-actions"><button className="button ghost" disabled={!clientLink} onClick={copyLink}><Copy size={16} /> Copy client link</button><a className="button ghost" target="_blank" href={clientLink || '#'}><Link size={16} /> Client view</a><button className="button dark" onClick={() => setComposer({})}><Plus size={17} /> New post</button></div></header>
+  return <main className="owner-page"><header className="owner-header"><div><p className="eyebrow">NUTRIFITNESS • CREATOR</p><h1>Posts</h1><p>Create, review and publish from one place.</p></div><div className="header-actions"><button className="button ghost" disabled={!clientLink} onClick={copyLink}><Copy size={16} /> Copy review link</button><a className="button ghost" target="_blank" rel="noreferrer" href={clientLink || '#'}><Link size={16} /> Open client view</a><button className="button dark" onClick={() => setComposer({})}><Plus size={17} /> New post</button></div></header>
     {notice && <div className="notice success"><CheckCircle2 size={17} />{notice}</div>}
     <section className="stats"><div><Clock3 /><strong>{drafts.filter(d => d.status === 'PENDING_REVIEW').length}</strong><span>Waiting for client</span></div><div><Package /><strong>{drafts.filter(d => d.status === 'PRODUCT_CHANGE_REQUESTED').length}</strong><span>Needs rework</span></div><div><CheckCircle2 /><strong>{drafts.filter(d => d.status === 'APPROVED').length}</strong><span>Approved</span></div><div><XCircle /><strong>{drafts.filter(d => d.status === 'REJECTED').length}</strong><span>Rejected</span></div></section>
     <section className="board"><aside className="post-list"><div className="filter-row">{['ALL', ...Object.keys(STATUS)].map(item => <button className={filter === item ? 'active' : ''} onClick={() => { setFilter(item); setSelectedId(''); }} key={item}>{item === 'ALL' ? 'All' : STATUS[item].label}</button>)}</div>
       <div className="post-list-scroll">{filtered.map(draft => <button onClick={() => setSelectedId(draft.id)} key={draft.id} className={`post-row ${selected?.id === draft.id ? 'selected' : ''}`}><img src={draft.media?.secure_url} alt="Post thumbnail" /><div><Pill status={draft.status} /><strong>{draft.media?.filename || draft.media?.title || 'Social post'}</strong><small>Revision {draft.revision || 1} · {prettyDate(draft.updatedAt || draft.createdAt)}</small></div><ChevronRight size={17} /></button>)}{!filtered.length && <p className="muted list-empty">No posts here yet.</p>}</div>
     </aside>
-    {selected ? <section className="detail"><div className="detail-top"><div><p className="eyebrow">REVISION {selected.revision || 1}</p><h2>{selected.media?.filename || 'Social post'}</h2></div><Pill status={selected.status} /></div><div className="detail-grid"><div><div className="image-frame"><img src={selected.media?.secure_url} alt="Selected social post" /></div>{selected.productRequest && <div className="request-box"><Package size={17} /><div><strong>Client product request</strong><p>{selected.productRequest}</p></div></div>}</div><div><p className="eyebrow">CAPTION</p><p className="caption-copy">{selected.captions?.instagramCaption}</p><p className="schedule-line"><CalendarDays size={16} /> {selected.scheduledFor ? `Scheduled: ${prettyDate(selected.scheduledFor)}` : 'No posting date selected'}</p>{selected.status === 'PRODUCT_CHANGE_REQUESTED' && <button className="button dark full" onClick={() => setComposer(selected)}><RefreshCw size={16} /> Update & resubmit</button>}{selected.status === 'APPROVED' && <p className="notice success"><Check size={16} /> Client approval is recorded and ready for scheduling.</p>}<History draft={selected} /></div></div></section> : <section className="empty-card"><Layers3 size={35} /><h2>Create your first post</h2><p>Choose an image, add a caption, then send it to the client review page.</p><button className="button dark" onClick={() => setComposer({})}><Plus size={16} /> New post</button></section>}</section>
-    <section className="cloudinary-guide"><div><ImageIcon size={20} /><div><strong>Cloudinary folder rule</strong><p>Keep source images in <code>nutrifitness/to-review</code>. Keep approved and posted assets for audit; do not auto-delete. Remove only duplicate, incorrect, or legally unusable originals after you confirm they are not attached to a post.</p></div></div></section>
+    {selected ? <section className="detail"><div className="detail-top"><div><p className="eyebrow">REVISION {selected.revision || 1}</p><h2>{selected.media?.filename || 'Social post'}</h2></div><Pill status={selected.status} /></div><div className="detail-grid"><div><div className="image-frame"><img src={selected.media?.secure_url} alt="Selected social post" /></div>{selected.productRequest && <div className="request-box"><Package size={17} /><div><strong>Product change</strong><p>{selected.productRequest}</p></div></div>}</div><div><p className="eyebrow">CAPTION</p><p className="caption-copy">{selected.captions?.instagramCaption}</p><p className="schedule-line"><CalendarDays size={16} /> {selected.scheduledFor ? prettyDate(selected.scheduledFor) : 'Publishing time not set'}</p>{selected.status === 'PRODUCT_CHANGE_REQUESTED' ? <button className="button dark full" onClick={() => setComposer(selected)}><RefreshCw size={16} /> Edit & resubmit</button> : null}{['APPROVED', 'SCHEDULED', 'PUBLISHING', 'PUBLISH_FAILED'].includes(selected.status) ? <button className="button dark full" onClick={() => setPublisher(selected)}><Send size={16} /> {selected.status === 'APPROVED' ? 'Publish with Blotato' : 'Manage Blotato publication'}</button> : null}{selected.status === 'APPROVED' ? <p className="approval-note"><Check size={15} /> Approved by client</p> : null}<History draft={selected} /></div></div></section> : <section className="empty-card"><Layers3 size={35} /><h2>Create your first post</h2><p>Choose an image, add a caption, then send it to the client review page.</p><button className="button dark" onClick={() => setComposer({})}><Plus size={16} /> New post</button></section>}</section>
+    <footer className="workspace-footer"><ImageIcon size={16} /><span>Cloudinary source files are preserved for audit. Blotato receives public media URLs only when you publish.</span></footer>
     {composer && <Composer media={media} initial={composer.id ? composer : null} onClose={() => setComposer(null)} onSave={composer.id ? resubmit : create} working={loading} />}
+    {publisher && <BlotatoPanel draft={publisher} onClose={() => setPublisher(null)} onUpdated={onDraftUpdated} />}
   </main>;
 }
 
@@ -146,7 +152,7 @@ export default function ApprovalWorkspace({ clientMode }) {
   const [notice, setNotice] = useState('');
   const [clientLink, setClientLink] = useState('');
   const clientToken = new URLSearchParams(window.location.search).get('token') || '';
-  const load = async (message = '') => {
+  const load = useCallback(async (message = '') => {
     setLoading(true);
     try {
       const endpoints = clientMode ? [`/api/drafts/client?token=${encodeURIComponent(clientToken)}`] : ['/api/drafts', '/api/media', '/api/drafts/client-link'];
@@ -157,8 +163,8 @@ export default function ApprovalWorkspace({ clientMode }) {
       if (message) { setNotice(message); window.setTimeout(() => setNotice(''), 4500); }
     } catch (error) { setNotice(error.message); }
     finally { setLoading(false); }
-  };
-  useEffect(() => { load(); }, [clientMode]);
+  }, [clientMode, clientToken]);
+  useEffect(() => { load(); }, [load]);
   const respond = async (id, payload) => {
     setLoading(true);
     try {
@@ -169,5 +175,6 @@ export default function ApprovalWorkspace({ clientMode }) {
       await load(messages[payload.action]);
     } catch (error) { setNotice(error.message); setLoading(false); }
   };
-  return clientMode ? <ClientPortal drafts={drafts} onRespond={respond} loading={loading} notice={notice} /> : <OwnerPortal drafts={drafts} media={media} refresh={load} loading={loading} notice={notice} clientLink={clientLink} />;
+  const updateDraftInPlace = useCallback(updated => setDrafts(current => current.map(draft => draft.id === updated.id ? updated : draft)), []);
+  return clientMode ? <ClientPortal drafts={drafts} onRespond={respond} loading={loading} notice={notice} /> : <OwnerPortal drafts={drafts} media={media} refresh={load} loading={loading} notice={notice} clientLink={clientLink} onDraftUpdated={updateDraftInPlace} />;
 }

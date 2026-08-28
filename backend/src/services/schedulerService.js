@@ -1,6 +1,5 @@
-import cron from 'node-cron';
 import { getSettings, addPostHistory, addLog } from './storageService.js';
-import { listMediaFromFolder, deleteMedia } from './cloudinaryService.js';
+import { listMediaFromFolder } from './cloudinaryService.js';
 import { generateViralPostContent } from './aiCaptionService.js';
 import { publishToPlatforms } from './blotatoService.js';
 
@@ -13,7 +12,7 @@ let isExecuting = false;
  * 2. Select next asset
  * 3. Generate French Swiss viral caption & Pinterest SEO data
  * 4. Publish via Blotato API (Instagram & Pinterest)
- * 5. If successful, permanently DELETE the media from Cloudinary
+ * 5. Preserve the Cloudinary media for audit and reuse
  * 6. Record to post history and logs
  */
 export async function executePostWorkflow(slotTheme = 'motivation', options = {}) {
@@ -80,14 +79,7 @@ export async function executePostWorkflow(slotTheme = 'motivation', options = {}
       (publishResult.instagram?.success || !settings.scheduling.postToInstagram) &&
       (publishResult.pinterest?.success || !settings.scheduling.postToPinterest);
 
-    // 4. Auto Delete from Cloudinary if successfully published
-    let deleteResult = null;
-    if (isPublishedOk && settings.scheduling.autoDeleteMediaOnSuccess !== false) {
-      addLog('info', `Suppression automatique du média Cloudinary après publication (${selectedMedia.public_id})...`);
-      deleteResult = await deleteMedia(selectedMedia.public_id, selectedMedia.resource_type || 'image');
-    }
-
-    // 5. Record to history
+    // 4. Record to history. Source media is never deleted by a publish workflow.
     const historyEntry = addPostHistory({
       media: {
         publicId: selectedMedia.public_id,
@@ -101,7 +93,7 @@ export async function executePostWorkflow(slotTheme = 'motivation', options = {}
         instagram: publishResult.instagram,
         pinterest: publishResult.pinterest
       },
-      autoDeleted: deleteResult?.success || false,
+      autoDeleted: false,
       slotTheme,
       status: isPublishedOk ? 'COMPLETED' : 'PARTIAL_FAILED',
       durationMs: Date.now() - startTime
@@ -113,7 +105,6 @@ export async function executePostWorkflow(slotTheme = 'motivation', options = {}
     return {
       success: isPublishedOk,
       historyEntry,
-      deleteResult,
       publishResult
     };
   } catch (error) {
@@ -134,36 +125,9 @@ export function initScheduler() {
   activeCronJobs.forEach(job => job.stop());
   activeCronJobs = [];
 
-  const settings = getSettings();
-  if (!settings.scheduling.enabled) {
-    addLog('info', 'Planificateur automatique désactivé dans les réglages.');
-    return;
-  }
-
-  const slots = settings.scheduling.slots || [
-    { id: 'slot-morning', time: '08:30', cron: '30 8 * * *', theme: 'motivation' },
-    { id: 'slot-lunch', time: '12:30', cron: '30 12 * * *', theme: 'nutrition' },
-    { id: 'slot-evening', time: '18:30', cron: '30 18 * * *', theme: 'workout' }
-  ];
-
-  slots.forEach(slot => {
-    try {
-      const task = cron.schedule(slot.cron, async () => {
-        addLog('info', `⏰ Déclencheur automatique : Créneau ${slot.label || slot.time} [${slot.theme}]`);
-        await executePostWorkflow(slot.theme);
-      }, {
-        scheduled: true,
-        timezone: settings.scheduling.timezone || 'Europe/Zurich'
-      });
-
-      activeCronJobs.push(task);
-      addLog('info', `Tâche planifiée enregistrée : ${slot.time} (${slot.theme}) - Fuseau : ${settings.scheduling.timezone}`);
-    } catch (err) {
-      addLog('error', `Erreur configuration cron pour le créneau ${slot.time}: ${err.message}`);
-    }
-  });
-
-  addLog('success', `Planificateur actif avec ${activeCronJobs.length} créneaux quotidiens (3 posts/jour pour la Suisse).`);
+  // The approval board schedules approved posts directly with Blotato. The old
+  // folder-driven cron publisher remains disabled to prevent accidental posts.
+  addLog('info', 'Planificateur automatique historique désactivé. Utilisez Blotato depuis un post approuvé.');
 }
 
 /**
@@ -199,9 +163,9 @@ export function getScheduleStatus() {
   }
 
   return {
-    enabled: settings.scheduling.enabled,
+    enabled: false,
     timezone: settings.scheduling.timezone,
-    autoDeleteMediaOnSuccess: settings.scheduling.autoDeleteMediaOnSuccess,
+    autoDeleteMediaOnSuccess: false,
     slots: upcoming,
     isExecuting
   };
