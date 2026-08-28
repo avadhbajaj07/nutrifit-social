@@ -150,7 +150,7 @@ export default function ApprovalWorkspace({ clientMode }) {
     setLoading(true);
     try {
       const endpoints = clientMode ? [`/api/drafts/client?token=${encodeURIComponent(clientToken)}`] : ['/api/drafts', '/api/media', '/api/drafts/client-link'];
-      const responses = await Promise.all(endpoints.map(fetch));
+      const responses = await Promise.all(endpoints.map(endpoint => fetch(endpoint)));
       if (!responses.every(response => response.ok)) throw new Error('The review board could not be loaded.');
       const data = await Promise.all(responses.map(response => response.json()));
       setDrafts(data[0].drafts || []); if (!clientMode) { setMedia(data[1].resources || []); setClientLink(`${window.location.origin}${window.location.pathname}?client=1&token=${encodeURIComponent(data[2].token)}`); }
