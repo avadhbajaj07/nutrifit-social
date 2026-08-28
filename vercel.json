@@ -1,17 +1,28 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "services": {
     "frontend": {
-      "entrypoint": "frontend",
-      "routePrefix": "/"
+      "root": "frontend/",
+      "framework": "vite"
     },
     "backend": {
-      "entrypoint": "backend/src/vercelApp.js",
-      "routePrefix": "/api",
-      "maxDuration": 60,
-      "includeFiles": [
-        "nutriftness.ch/**",
-        "products/**"
-      ]
+      "root": "backend/",
+      "entrypoint": "src/app.js",
+      "framework": "express"
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "frontend"
+      }
+    }
+  ]
 }
