@@ -360,7 +360,7 @@ a { color: inherit; }
 }
 
 /* ── Client portal ── */
-.client-page { width: min(980px, 100%); padding-top: 32px; }
+.client-page { width: min(1080px, 100%); padding-top: 32px; }
 .client-header { margin-bottom: 18px; }
 .brand-mark {
   width: 36px;
@@ -402,14 +402,25 @@ a { color: inherit; }
 .client-switcher > button.active { color: #111827; background: #fff; border-color: #9ca3af; }
 .client-card {
   display: grid;
-  grid-template-columns: minmax(290px, .82fr) 1.18fr;
+  grid-template-columns: minmax(340px, .9fr) minmax(0, 1.1fr);
+  align-items: stretch;
   overflow: hidden;
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
 }
-.client-card > .image-frame { min-height: 520px; border-radius: 0; }
-.client-copy { padding: 28px; }
+.client-card > .image-frame {
+  height: 100%;
+  min-height: 620px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: auto;
+  background: #f3f4f6;
+  border-radius: 0;
+}
+.client-card > .image-frame img { object-fit: contain; }
+.client-copy { min-width: 0; padding: 28px; }
 .client-copy h2 { font-size: 22px; }
 .review-actions { margin-top: 18px; padding-top: 14px; border-top: 1px solid #f3f4f6; }
 .review-actions > .action {
@@ -503,7 +514,16 @@ a { color: inherit; }
   .post-list { border-right: 0; border-bottom: 1px solid #e5e7eb; }
   .post-list-scroll { max-height: 220px; }
   .detail-grid, .composer-layout, .client-card, .publish-layout { grid-template-columns: 1fr; }
-  .client-card > .image-frame { min-height: 0; }
+  .client-card > .image-frame {
+    height: auto;
+    min-height: 0;
+    aspect-ratio: auto;
+  }
+  .client-card > .image-frame img {
+    width: 100%;
+    height: auto;
+    max-height: 70vh;
+  }
   .client-copy, .detail { padding: 18px; }
   .publish-preview { max-width: 280px; margin: auto; }
   .round-chip { margin-left: 0; }
