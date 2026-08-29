@@ -19,25 +19,35 @@ router.get('/products', (req, res) => {
   }
 });
 
-// Get all media (products prioritized)
+// Use the configured Cloudinary review folder whenever it is available.
+// Bundled assets are only a local-development fallback, so they never get
+// mixed into a client's real production media library.
 router.get('/', async (req, res) => {
   try {
     const products = getClientProductsList();
     const localMedia = getLocalClientMedia();
 
-    let cloudinaryMedia = [];
+    let cloudinaryResult = null;
     try {
-      cloudinaryMedia = (await listMediaFromFolder()).resources || [];
+      cloudinaryResult = await listMediaFromFolder();
     } catch (e) {}
 
-    const all = [...products, ...localMedia, ...cloudinaryMedia];
+    const cloudinaryMedia = cloudinaryResult?.isLocal
+      ? []
+      : cloudinaryResult?.resources || [];
+    const usingCloudinary = cloudinaryMedia.length > 0;
+    const resources = usingCloudinary
+      ? cloudinaryMedia
+      : [...products, ...localMedia];
 
     res.json({
-      total: all.length,
-      productsCount: products.length,
-      localCount: localMedia.length,
+      total: resources.length,
+      source: usingCloudinary ? 'cloudinary' : 'local-fallback',
+      folder: usingCloudinary ? cloudinaryResult.folder : null,
+      productsCount: usingCloudinary ? 0 : products.length,
+      localCount: usingCloudinary ? 0 : localMedia.length,
       cloudinaryCount: cloudinaryMedia.length,
-      resources: all
+      resources
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
