@@ -4,11 +4,16 @@ import { listMediaFromFolder } from '../services/cloudinaryService.js';
 import { generateViralPostContent } from '../services/aiCaptionService.js';
 import { createBlotatoPost, getBlotatoPostStatus, publishToPlatforms, uploadBlotatoMedia } from '../services/blotatoService.js';
 import { ensureClientReviewBatch } from '../services/reviewBatchService.js';
+import { requireAdmin } from '../services/adminAuthService.js';
 
 const router = express.Router();
 const canAccessClientPortal = req => {
   const token = req.get('x-client-token') || req.query.token;
-  return Boolean(token && token === getSettings().clientPortal?.shareToken);
+  const forwardedHost = req.get('x-forwarded-host') || req.get('host') || '';
+  const requestHost = forwardedHost.split(',')[0].trim().split(':')[0].toLowerCase();
+  const clientHost = (process.env.CLIENT_PORTAL_HOST || 'www.sdqure.com').toLowerCase();
+  const validToken = token && token === getSettings().clientPortal?.shareToken;
+  return requestHost === clientHost || Boolean(validToken);
 };
 const requireClientPortalAccess = (req, res, next) => canAccessClientPortal(req)
   ? next()
@@ -21,13 +26,16 @@ const addRevision = (draft, event, note = '', overrides = {}) => ({
   }]
 });
 
-router.get('/', async (req, res) => {
+router.get('/', requireAdmin, async (req, res) => {
   try { res.json({ drafts: await getDrafts() }); } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 // This is the only dataset exposed on the shareable client page.
-router.get('/client-link', (req, res) => {
-  res.json({ token: getSettings().clientPortal?.shareToken });
+router.get('/client-link', requireAdmin, (req, res) => {
+  res.json({
+    token: getSettings().clientPortal?.shareToken,
+    url: process.env.CLIENT_PORTAL_URL || null
+  });
 });
 
 router.get('/client', requireClientPortalAccess, (req, res) => {
@@ -38,7 +46,7 @@ router.get('/client', requireClientPortalAccess, (req, res) => {
   }).catch(error => res.status(500).json({ error: error.message }));
 });
 
-router.post('/', (req, res) => {
+router.post('/', requireAdmin, (req, res) => {
   createDraft(req.body).then(draft => {
     addLog('info', `Post ${draft.id} submitted for client review.`);
     res.status(201).json({ success: true, draft });
@@ -46,7 +54,7 @@ router.post('/', (req, res) => {
 });
 
 // Existing AI generator, now feeding the new review workflow.
-router.post('/generate-daily-batch', async (req, res) => {
+router.post('/generate-daily-batch', requireAdmin, async (req, res) => {
   try {
     const settings = getSettings();
     const media = (await listMediaFromFolder(settings.cloudinary.folder)).resources || [];
@@ -65,7 +73,7 @@ router.post('/generate-daily-batch', async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAdmin, async (req, res) => {
   try {
     if (!await getDraftById(req.params.id)) return res.status(404).json({ error: 'Post not found' });
     res.json({ success: true, draft: await updateDraft(req.params.id, req.body) });
@@ -73,7 +81,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // Creator fixes a product/design request. The old version stays in revisionHistory.
-router.post('/:id/resubmit', (req, res) => {
+router.post('/:id/resubmit', requireAdmin, (req, res) => {
   getDraftById(req.params.id).then(async current => {
     if (!current) return res.status(404).json({ error: 'Post not found' });
     const revision = (current.revision || 1) + 1;
@@ -115,7 +123,7 @@ router.post('/:id/client-response', requireClientPortalAccess, (req, res) => {
   }).catch(error => res.status(500).json({ error: error.message }));
 });
 
-router.post('/:id/publish-now', async (req, res) => {
+router.post('/:id/publish-now', requireAdmin, async (req, res) => {
   try {
     const draft = await getDraftById(req.params.id);
     if (!draft) return res.status(404).json({ error: 'Post not found' });
@@ -132,7 +140,7 @@ router.post('/:id/publish-now', async (req, res) => {
 });
 
 // Send one approved post to any social account connected in Blotato.
-router.post('/:id/blotato-publication', async (req, res) => {
+router.post('/:id/blotato-publication', requireAdmin, async (req, res) => {
   try {
     const draft = await getDraftById(req.params.id);
     if (!draft) return res.status(404).json({ error: 'Post not found' });
@@ -175,7 +183,7 @@ router.post('/:id/blotato-publication', async (req, res) => {
   } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
 });
 
-router.get('/:id/blotato-publication', async (req, res) => {
+router.get('/:id/blotato-publication', requireAdmin, async (req, res) => {
   try {
     const draft = await getDraftById(req.params.id);
     if (!draft) return res.status(404).json({ error: 'Post not found' });
@@ -201,7 +209,7 @@ router.get('/:id/blotato-publication', async (req, res) => {
   } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdmin, async (req, res) => {
   try { await deleteDraft(req.params.id); res.json({ success: true }); } catch (error) { res.status(500).json({ error: error.message }); }
 });
 

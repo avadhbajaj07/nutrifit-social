@@ -88,7 +88,7 @@ function ClientPortal({ drafts, onRespond, loading, notice }) {
       <div className="client-switcher">{drafts.map((post, index) => <button key={post.id} onClick={() => setCurrentId(post.id)} className={current.id === post.id ? 'active' : ''}>Post {index + 1} <Pill status={post.status} /></button>)}</div>
       <article className="client-card">
         <div className="image-frame"><img src={current.media?.secure_url} alt="Post awaiting review" /></div>
-        <div className="client-copy"><div className="card-heading"><div><p className="eyebrow">REVISION {current.revision || 1}</p><h2>Does this work?</h2></div><Pill status={current.status} /></div>
+        <div className="client-copy"><div className="card-heading"><div><p className="eyebrow">REVISION {current.revision || 1}</p><h2>Caption</h2></div><Pill status={current.status} /></div>
           <p className="caption-copy">{current.captions?.instagramCaption}</p>
           {current.scheduledFor && <p className="schedule-line"><Clock3 size={16} /> Posting date: {prettyDate(current.scheduledFor)}</p>}
           <ClientActions draft={current} onRespond={onRespond} working={loading} />
@@ -159,7 +159,7 @@ export default function ApprovalWorkspace({ clientMode }) {
       const responses = await Promise.all(endpoints.map(endpoint => fetch(endpoint)));
       if (!responses.every(response => response.ok)) throw new Error('The review board could not be loaded.');
       const data = await Promise.all(responses.map(response => response.json()));
-      setDrafts(data[0].drafts || []); if (!clientMode) { setMedia(data[1].resources || []); setClientLink(`${window.location.origin}${window.location.pathname}?client=1&token=${encodeURIComponent(data[2].token)}`); }
+      setDrafts(data[0].drafts || []); if (!clientMode) { setMedia(data[1].resources || []); setClientLink(data[2].url || `${window.location.origin}${window.location.pathname}?client=1&token=${encodeURIComponent(data[2].token)}`); }
       if (message) { setNotice(message); window.setTimeout(() => setNotice(''), 4500); }
     } catch (error) { setNotice(error.message); }
     finally { setLoading(false); }

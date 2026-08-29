@@ -11,7 +11,9 @@ import emailApprovalRoutes from './routes/emailApproval.js';
 import aiRoutes from './routes/ai.js';
 import settingsRoutes from './routes/settings.js';
 import blotatoRoutes from './routes/blotato.js';
+import adminAuthRoutes from './routes/adminAuth.js';
 import { isPersistentStorageConfigured } from './services/storageService.js';
+import { requireAdmin } from './services/adminAuthService.js';
 
 dotenv.config();
 
@@ -33,13 +35,14 @@ app.use('/api/products-media', express.static(PRODUCTS_MEDIA_PATH));
 app.use('/api/local-media', express.static(LOCAL_MEDIA_PATH));
 
 // API Endpoints
-app.use('/api/media', mediaRoutes);
-app.use('/api/posts', postsRoutes);
+app.use('/api/auth/admin', adminAuthRoutes);
+app.use('/api/media', requireAdmin, mediaRoutes);
+app.use('/api/posts', requireAdmin, postsRoutes);
 app.use('/api/drafts', draftsRoutes);
-app.use('/api/email-approval', emailApprovalRoutes);
-app.use('/api/ai', aiRoutes);
-app.use('/api/settings', settingsRoutes);
-app.use('/api/blotato', blotatoRoutes);
+app.use('/api/email-approval', requireAdmin, emailApprovalRoutes);
+app.use('/api/ai', requireAdmin, aiRoutes);
+app.use('/api/settings', requireAdmin, settingsRoutes);
+app.use('/api/blotato', requireAdmin, blotatoRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
