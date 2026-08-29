@@ -168,7 +168,7 @@ async function getImageAttachment(draft) {
 
 export async function sendApprovalEmailToClient(draftId, clientEmailOverride = null) {
   const settings = getSettings();
-  const drafts = getDrafts();
+  const drafts = await getDrafts();
   const draft = drafts.find(d => d.id === draftId);
 
   if (!draft) {
@@ -208,7 +208,7 @@ export async function sendApprovalEmailToClient(draftId, clientEmailOverride = n
       const data = await sender.client.emails.send(emailPayload);
       addLog('success', `Email Resend envoyé avec boutons Approuver, Modifier et Rejeter à ${recipientEmail}`);
       
-      updateDraft(draftId, {
+      await updateDraft(draftId, {
         emailSentTo: recipientEmail,
         emailSentAt: new Date().toISOString()
       });
@@ -231,8 +231,8 @@ export async function sendApprovalEmailToClient(draftId, clientEmailOverride = n
   };
 }
 
-export function processClientEmailReply(draftId, replyBody = '') {
-  const drafts = getDrafts();
+export async function processClientEmailReply(draftId, replyBody = '') {
+  const drafts = await getDrafts();
   const draft = drafts.find(d => d.id === draftId);
 
   if (!draft) {
@@ -247,7 +247,7 @@ export function processClientEmailReply(draftId, replyBody = '') {
   const isDirectReject = rejectKeywords.some(k => lower === k || lower.startsWith(k + ' ') || lower.startsWith(k + '!') || lower.startsWith(k + '.'));
 
   if (isDirectReject) {
-    const updated = updateDraft(draftId, {
+    const updated = await updateDraft(draftId, {
       status: 'REJECTED',
       rejectedAt: new Date().toISOString(),
       rejectedVia: 'EMAIL_REPLY_REJECTION',
@@ -268,7 +268,7 @@ export function processClientEmailReply(draftId, replyBody = '') {
   const isDirectApproval = approvalKeywords.some(k => lower === k || lower.startsWith(k + ' ') || lower.startsWith(k + '!') || lower.startsWith(k + '.'));
 
   if (isDirectApproval) {
-    const updated = updateDraft(draftId, {
+    const updated = await updateDraft(draftId, {
       status: 'APPROVED',
       approvedAt: new Date().toISOString(),
       approvedVia: 'EMAIL_REPLY',
@@ -284,7 +284,7 @@ export function processClientEmailReply(draftId, replyBody = '') {
     };
   } else {
     const sanitized = sanitizeInstagramCaption(cleanedBody);
-    const updated = updateDraft(draftId, {
+    const updated = await updateDraft(draftId, {
       status: 'APPROVED',
       approvedAt: new Date().toISOString(),
       approvedVia: 'EMAIL_REPLY_WITH_REVISED_CAPTION',

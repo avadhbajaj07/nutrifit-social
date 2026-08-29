@@ -55,10 +55,10 @@ router.post('/test-cloudinary', async (req, res) => {
   }
 });
 
-router.get('/logs', (req, res) => {
+router.get('/logs', async (req, res) => {
   try {
     const { limit = 100 } = req.query;
-    const logs = getLogs(parseInt(limit));
+    const logs = await getLogs(parseInt(limit));
     res.json({ logs });
   } catch (error) {
     res.status(500).json({ error: error.message });

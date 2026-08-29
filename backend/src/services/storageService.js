@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
+import { createClient } from '@supabase/supabase-js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,24 +15,21 @@ const STORE_PATH = path.join(DATA_DIR, 'store.json');
 const DEFAULT_DATA = {
   settings: {
     safetyLock: {
-      sendToMarcoAllowed: false, // HARD SAFETY LOCK: Marco will NEVER receive an email without explicit approval
+      sendToMarcoAllowed: false,
       supervisorEmail: 'avadhbajaj07@gmail.com',
       clientEmail: 'marco.scarpantoni@hotmail.com'
     },
     email: {
       senderEmail: 'Hello@avadhbajaj.com',
-      clientEmail: 'avadhbajaj07@gmail.com', // Safe default: only send to you during review
+      clientEmail: 'avadhbajaj07@gmail.com',
       resendApiKey: process.env.RESEND_API_KEY || ''
     },
-    clientPortal: {
-      // A private review-link token. Set CLIENT_PORTAL_TOKEN to manage it explicitly in production.
-      shareToken: process.env.CLIENT_PORTAL_TOKEN || randomUUID()
-    },
+    clientPortal: { shareToken: process.env.CLIENT_PORTAL_TOKEN || randomUUID() },
     cloudinary: {
       cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
       apiKey: process.env.CLOUDINARY_API_KEY || '',
       apiSecret: process.env.CLOUDINARY_API_SECRET || '',
-      folder: process.env.CLOUDINARY_FOLDER || 'nutrifitness/to-review'
+      folder: process.env.CLOUDINARY_FOLDER || 'nutrifitness'
     },
     blotato: {
       apiKey: process.env.BLOTATO_API_KEY || '',
@@ -41,7 +39,7 @@ const DEFAULT_DATA = {
       pinterestBoardId: process.env.BLOTATO_PIN_BOARD_ID || ''
     },
     scheduling: {
-      enabled: false, // Disabled until you approve
+      enabled: false,
       requireClientApproval: true,
       timezone: process.env.APP_TIMEZONE || 'Europe/Zurich',
       slots: [
@@ -49,7 +47,6 @@ const DEFAULT_DATA = {
         { id: 'slot-lunch', label: 'Midi (Nutrition & Recette Saine)', time: '12:30', cron: '30 12 * * *', theme: 'nutrition' },
         { id: 'slot-evening', label: 'Soir (Workout & Engagement)', time: '18:30', cron: '30 18 * * *', theme: 'workout' }
       ],
-      // Keep a recoverable audit trail. Posted files can be archived, never silently deleted.
       autoDeleteMediaOnSuccess: false,
       postToInstagram: true,
       postToPinterest: true
@@ -68,43 +65,54 @@ const DEFAULT_DATA = {
 };
 
 let memoryStore = null;
+let supabaseClient = null;
 
 try {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+} catch (error) {}
+
+function getSupabase() {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
+  if (!url || !key) return null;
+  if (!supabaseClient) {
+    supabaseClient = createClient(url, key, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
   }
-} catch (e) {}
+  return supabaseClient;
+}
 
-export function loadStore() {
+function normalizeDraft(draft) {
+  if (!draft) return draft;
+  const status = draft.status === 'PENDING_APPROVAL' ? 'PENDING_REVIEW' : draft.status;
+  const secureUrl = draft.media?.secure_url
+    ?.replace(/^http:\/\/localhost:5001\/local-media/, '/api/local-media')
+    ?.replace(/^\/local-media/, '/api/local-media') || draft.media?.secure_url;
+  const media = draft.media ? { ...draft.media, secure_url: secureUrl } : draft.media;
+  const revision = draft.revision || 1;
+  return {
+    ...draft,
+    status,
+    media,
+    revision,
+    revisionHistory: draft.revisionHistory?.length ? draft.revisionHistory : [{
+      revision,
+      event: status === 'APPROVED' ? 'APPROVED' : 'SUBMITTED',
+      at: draft.approvedAt || draft.createdAt || new Date().toISOString(),
+      note: status === 'APPROVED' ? 'Approved in the previous workflow.' : 'Imported from the previous workflow.',
+      caption: draft.captions?.instagramCaption || '',
+      media
+    }],
+    productRequest: draft.productRequest || ''
+  };
+}
+
+function loadLocalStore() {
   if (memoryStore) return memoryStore;
-
   try {
     if (fs.existsSync(STORE_PATH)) {
-      const raw = fs.readFileSync(STORE_PATH, 'utf-8');
-      const parsed = JSON.parse(raw);
-      const drafts = (parsed.drafts || []).map(draft => {
-        const status = draft.status === 'PENDING_APPROVAL' ? 'PENDING_REVIEW' : draft.status;
-        const secureUrl = draft.media?.secure_url
-          ?.replace(/^http:\/\/localhost:5001\/local-media/, '/api/local-media')
-          ?.replace(/^\/local-media/, '/api/local-media') || draft.media?.secure_url;
-        const media = draft.media ? { ...draft.media, secure_url: secureUrl } : draft.media;
-        const revision = draft.revision || 1;
-        return {
-          ...draft,
-          status,
-          media,
-          revision,
-          revisionHistory: draft.revisionHistory?.length ? draft.revisionHistory : [{
-            revision,
-            event: status === 'APPROVED' ? 'APPROVED' : 'SUBMITTED',
-            at: draft.approvedAt || draft.createdAt || new Date().toISOString(),
-            note: status === 'APPROVED' ? 'Approved in the previous workflow.' : 'Imported from the previous workflow.',
-            caption: draft.captions?.instagramCaption || '',
-            media
-          }],
-          productRequest: draft.productRequest || ''
-        };
-      });
+      const parsed = JSON.parse(fs.readFileSync(STORE_PATH, 'utf-8'));
       memoryStore = {
         settings: {
           ...DEFAULT_DATA.settings,
@@ -121,38 +129,31 @@ export function loadStore() {
             autoDeleteMediaOnSuccess: false
           }
         },
-        drafts,
+        drafts: (parsed.drafts || []).map(normalizeDraft),
         postsHistory: parsed.postsHistory || [],
         logs: parsed.logs || []
       };
-      // Persist a token once for installations created before the client portal existed.
-      if (!parsed.settings?.clientPortal?.shareToken) saveStore(memoryStore);
       return memoryStore;
     }
   } catch (error) {}
-
-  memoryStore = { ...DEFAULT_DATA };
+  memoryStore = structuredClone(DEFAULT_DATA);
   return memoryStore;
 }
 
-export function saveStore(data) {
+function saveLocalStore(data) {
   memoryStore = data;
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), 'utf-8');
   } catch (error) {}
-  return true;
 }
 
 export function getSettings() {
-  const store = loadStore();
-  return store.settings;
+  return loadLocalStore().settings;
 }
 
 export function updateSettings(newSettings) {
-  const store = loadStore();
+  const store = loadLocalStore();
   store.settings = {
     ...store.settings,
     ...newSettings,
@@ -168,21 +169,39 @@ export function updateSettings(newSettings) {
       autoDeleteMediaOnSuccess: false
     }
   };
-  saveStore(store);
+  saveLocalStore(store);
   return store.settings;
 }
 
-export function getDrafts() {
-  const store = loadStore();
-  return store.drafts || [];
+export async function getDrafts() {
+  const supabase = getSupabase();
+  if (!supabase) return loadLocalStore().drafts || [];
+  const { data, error } = await supabase
+    .from('nutrifitness_drafts')
+    .select('data')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map(row => normalizeDraft(row.data));
 }
 
-export function createDraft(draftData) {
-  const store = loadStore();
-  const newDraft = {
+export async function getDraftById(id) {
+  const supabase = getSupabase();
+  if (!supabase) return (loadLocalStore().drafts || []).find(draft => draft.id === id) || null;
+  const { data, error } = await supabase
+    .from('nutrifitness_drafts')
+    .select('data')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return normalizeDraft(data?.data || null);
+}
+
+export async function createDraft(draftData) {
+  const createdAt = draftData.createdAt || new Date().toISOString();
+  const newDraft = normalizeDraft({
     id: draftData.id || 'draft_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
-    createdAt: new Date().toISOString(),
-    status: 'PENDING_REVIEW',
+    createdAt,
+    status: draftData.status || 'PENDING_REVIEW',
     theme: draftData.theme || 'motivation',
     slotTime: draftData.slotTime || '08:30',
     media: draftData.media,
@@ -191,68 +210,112 @@ export function createDraft(draftData) {
       pinterestTitle: draftData.captions?.pinterestTitle || 'NutriFitness.ch 🇨🇭',
       pinterestDescription: draftData.captions?.pinterestDescription || ''
     },
-    clientFeedback: '',
-    productRequest: '',
-    approvedAt: null,
-    publishedAt: null,
+    clientFeedback: draftData.clientFeedback || '',
+    productRequest: draftData.productRequest || '',
+    approvedAt: draftData.approvedAt || null,
+    publishedAt: draftData.publishedAt || null,
     scheduledFor: draftData.scheduledFor || null,
-    revision: 1,
-    revisionHistory: [{
+    revision: draftData.revision || 1,
+    revisionHistory: draftData.revisionHistory?.length ? draftData.revisionHistory : [{
       revision: 1,
       event: 'SUBMITTED',
-      at: new Date().toISOString(),
+      at: createdAt,
       caption: draftData.captions?.instagramCaption || '',
       media: draftData.media,
       note: 'Post submitted for client review.'
     }]
-  };
-  store.drafts.unshift(newDraft);
-  saveStore(store);
+  });
+
+  const supabase = getSupabase();
+  if (!supabase) {
+    const store = loadLocalStore();
+    store.drafts.unshift(newDraft);
+    saveLocalStore(store);
+    return newDraft;
+  }
+
+  const mediaPublicId = newDraft.media?.public_id || `draft:${newDraft.id}`;
+  const { error } = await supabase.from('nutrifitness_drafts').insert({
+    id: newDraft.id,
+    status: newDraft.status,
+    media_public_id: mediaPublicId,
+    data: newDraft,
+    created_at: newDraft.createdAt,
+    updated_at: newDraft.updatedAt || newDraft.createdAt
+  });
+  if (error) throw error;
   return newDraft;
 }
 
-export function updateDraft(id, updates) {
-  const store = loadStore();
-  const index = store.drafts.findIndex(d => d.id === id);
-  if (index === -1) return null;
-
-  store.drafts[index] = {
-    ...store.drafts[index],
-    ...updates,
-    updatedAt: new Date().toISOString()
-  };
-  saveStore(store);
-  return store.drafts[index];
+export async function updateDraft(id, updates) {
+  const current = await getDraftById(id);
+  if (!current) return null;
+  const updated = normalizeDraft({ ...current, ...updates, updatedAt: new Date().toISOString() });
+  const supabase = getSupabase();
+  if (!supabase) {
+    const store = loadLocalStore();
+    const index = store.drafts.findIndex(draft => draft.id === id);
+    store.drafts[index] = updated;
+    saveLocalStore(store);
+    return updated;
+  }
+  const { error } = await supabase
+    .from('nutrifitness_drafts')
+    .update({ status: updated.status, data: updated, updated_at: updated.updatedAt })
+    .eq('id', id);
+  if (error) throw error;
+  return updated;
 }
 
-export function deleteDraft(id) {
-  const store = loadStore();
-  store.drafts = store.drafts.filter(d => d.id !== id);
-  saveStore(store);
+export async function deleteDraft(id) {
+  const supabase = getSupabase();
+  if (!supabase) {
+    const store = loadLocalStore();
+    store.drafts = store.drafts.filter(draft => draft.id !== id);
+    saveLocalStore(store);
+    return true;
+  }
+  const { error } = await supabase.from('nutrifitness_drafts').delete().eq('id', id);
+  if (error) throw error;
   return true;
 }
 
-export function addPostHistory(entry) {
-  const store = loadStore();
-  store.postsHistory.unshift({
-    id: entry.id || Date.now().toString(),
+export async function addPostHistory(entry) {
+  const historyEntry = {
+    id: entry.id || Date.now().toString() + '-' + Math.random().toString(36).substring(2, 6),
     timestamp: new Date().toISOString(),
     ...entry
-  });
-  if (store.postsHistory.length > 200) {
+  };
+  const supabase = getSupabase();
+  if (!supabase) {
+    const store = loadLocalStore();
+    store.postsHistory.unshift(historyEntry);
     store.postsHistory = store.postsHistory.slice(0, 200);
+    saveLocalStore(store);
+    return historyEntry;
   }
-  saveStore(store);
-  return store.postsHistory[0];
+  const { error } = await supabase.from('nutrifitness_post_history').insert({
+    id: historyEntry.id,
+    data: historyEntry,
+    created_at: historyEntry.timestamp
+  });
+  if (error) throw error;
+  return historyEntry;
 }
 
-export function getPostHistory() {
-  const store = loadStore();
-  return store.postsHistory;
+export async function getPostHistory() {
+  const supabase = getSupabase();
+  if (!supabase) return loadLocalStore().postsHistory || [];
+  const { data, error } = await supabase
+    .from('nutrifitness_post_history')
+    .select('data')
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return (data || []).map(row => row.data);
 }
 
-export function addLog(level, message, metadata = {}) {
-  const store = loadStore();
+export async function addLog(level, message, metadata = {}) {
   const logEntry = {
     id: Date.now().toString() + '-' + Math.random().toString(36).substring(2, 6),
     timestamp: new Date().toISOString(),
@@ -260,16 +323,38 @@ export function addLog(level, message, metadata = {}) {
     message,
     metadata
   };
-  store.logs.unshift(logEntry);
-  if (store.logs.length > 300) {
-    store.logs = store.logs.slice(0, 300);
-  }
-  saveStore(store);
   console.log(`[${level.toUpperCase()}] ${message}`);
+  const supabase = getSupabase();
+  if (!supabase) {
+    const store = loadLocalStore();
+    store.logs.unshift(logEntry);
+    store.logs = store.logs.slice(0, 300);
+    saveLocalStore(store);
+    return logEntry;
+  }
+  const { error } = await supabase.from('nutrifitness_logs').insert({
+    id: logEntry.id,
+    level,
+    message,
+    data: logEntry,
+    created_at: logEntry.timestamp
+  });
+  if (error) console.warn(`Could not persist log: ${error.message}`);
   return logEntry;
 }
 
-export function getLogs(limit = 100) {
-  const store = loadStore();
-  return store.logs.slice(0, limit);
+export async function getLogs(limit = 100) {
+  const supabase = getSupabase();
+  if (!supabase) return (loadLocalStore().logs || []).slice(0, limit);
+  const { data, error } = await supabase
+    .from('nutrifitness_logs')
+    .select('data')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data || []).map(row => row.data);
+}
+
+export function isPersistentStorageConfigured() {
+  return Boolean(getSupabase());
 }

@@ -18,9 +18,9 @@ router.post('/trigger-now', async (req, res) => {
   }
 });
 
-router.get('/history', (req, res) => {
+router.get('/history', async (req, res) => {
   try {
-    const history = getPostHistory();
+    const history = await getPostHistory();
     res.json({ history });
   } catch (error) {
     res.status(500).json({ error: error.message });

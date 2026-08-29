@@ -80,7 +80,7 @@ export async function executePostWorkflow(slotTheme = 'motivation', options = {}
       (publishResult.pinterest?.success || !settings.scheduling.postToPinterest);
 
     // 4. Record to history. Source media is never deleted by a publish workflow.
-    const historyEntry = addPostHistory({
+    const historyEntry = await addPostHistory({
       media: {
         publicId: selectedMedia.public_id,
         url: selectedMedia.secure_url,

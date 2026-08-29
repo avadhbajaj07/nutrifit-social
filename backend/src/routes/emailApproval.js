@@ -21,13 +21,13 @@ router.post('/send/:draftId', async (req, res) => {
 });
 
 // 1-Click Action from Email (Approve OR Disapprove / Reject)
-router.get('/approve/:draftId', (req, res) => {
+router.get('/approve/:draftId', async (req, res) => {
   try {
     const { draftId } = req.params;
     const action = req.query.action || 'approve';
 
     if (action === 'reject') {
-      const updated = updateDraft(draftId, {
+      const updated = await updateDraft(draftId, {
         status: 'REJECTED',
         rejectedAt: new Date().toISOString(),
         rejectedVia: 'EMAIL_DISAPPROVE_BUTTON'
@@ -64,7 +64,7 @@ router.get('/approve/:draftId', (req, res) => {
     }
 
     // Default: APPROVE
-    const updated = updateDraft(draftId, {
+    const updated = await updateDraft(draftId, {
       status: 'APPROVED',
       approvedAt: new Date().toISOString(),
       approvedVia: 'EMAIL_BUTTON_CLICK'
@@ -112,10 +112,10 @@ router.get('/approve/:draftId', (req, res) => {
 });
 
 // Interactive Web Caption Editor (Mobile-friendly direct edit page)
-router.get('/edit/:draftId', (req, res) => {
+router.get('/edit/:draftId', async (req, res) => {
   try {
     const { draftId } = req.params;
-    const drafts = getDrafts();
+    const drafts = await getDrafts();
     const draft = drafts.find(d => d.id === draftId);
 
     const caption = draft?.captions?.instagramCaption || '';
@@ -161,13 +161,13 @@ router.get('/edit/:draftId', (req, res) => {
 });
 
 // Save edited caption & approve
-router.post('/save-and-approve/:draftId', (req, res) => {
+router.post('/save-and-approve/:draftId', async (req, res) => {
   try {
     const { draftId } = req.params;
     const rawCaption = req.body.caption || '';
     const sanitized = sanitizeInstagramCaption(rawCaption);
 
-    const updated = updateDraft(draftId, {
+    const updated = await updateDraft(draftId, {
       status: 'APPROVED',
       approvedAt: new Date().toISOString(),
       approvedVia: 'WEB_CAPTION_EDIT_AND_APPROVE',
@@ -185,10 +185,10 @@ router.post('/save-and-approve/:draftId', (req, res) => {
 });
 
 // Simulate client email reply
-router.post('/simulate-reply', (req, res) => {
+router.post('/simulate-reply', async (req, res) => {
   try {
     const { draftId, replyBody } = req.body;
-    const result = processClientEmailReply(draftId, replyBody);
+    const result = await processClientEmailReply(draftId, replyBody);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

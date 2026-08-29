@@ -11,6 +11,7 @@ import emailApprovalRoutes from './routes/emailApproval.js';
 import aiRoutes from './routes/ai.js';
 import settingsRoutes from './routes/settings.js';
 import blotatoRoutes from './routes/blotato.js';
+import { isPersistentStorageConfigured } from './services/storageService.js';
 
 dotenv.config();
 
@@ -45,6 +46,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     service: 'NutriFitness Social Media Automation Server',
+    storage: isPersistentStorageConfigured() ? 'supabase' : 'local-fallback',
     website: 'nutrifitness.ch',
     language: 'fr',
     target: 'Suisse (Romandie)',
