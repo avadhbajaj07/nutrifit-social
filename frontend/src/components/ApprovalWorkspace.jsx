@@ -39,6 +39,13 @@ function Pill({ status }) {
   return <span className={`status-pill ${config.tone}`}>{config.label}</span>;
 }
 
+function SiteFooter() {
+  return <footer className="site-footer">
+    <span>NutriFit Social Media</span>
+    <span>Managed by <a href="https://avadhbajaj.com" target="_blank" rel="noreferrer">Avadh Bajaj · avadhbajaj.com</a></span>
+  </footer>;
+}
+
 function History({ draft }) {
   const events = [...(draft.revisionHistory || [])].reverse();
   return <div className="review-history">
@@ -96,6 +103,7 @@ function ClientPortal({ drafts, onRespond, loading, notice }) {
         </div>
       </article>
     </> : <div className="empty-card"><CheckCircle2 size={34} /><h2>All caught up</h2><p>There are no posts waiting for your review.</p></div>}
+    <SiteFooter />
   </main>;
 }
 
@@ -139,7 +147,7 @@ function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink, onDr
       <div className="post-list-scroll">{filtered.map(draft => <button onClick={() => setSelectedId(draft.id)} key={draft.id} className={`post-row ${selected?.id === draft.id ? 'selected' : ''}`}><img src={draft.media?.secure_url} alt="Post thumbnail" /><div><Pill status={draft.status} /><strong>{draft.media?.filename || draft.media?.title || 'Social post'}</strong><small>Revision {draft.revision || 1} · {prettyDate(draft.updatedAt || draft.createdAt)}</small></div><ChevronRight size={17} /></button>)}{!filtered.length && <p className="muted list-empty">No posts here yet.</p>}</div>
     </aside>
     {selected ? <section className="detail"><div className="detail-top"><div><p className="eyebrow">REVISION {selected.revision || 1}</p><h2>{selected.media?.filename || 'Social post'}</h2></div><Pill status={selected.status} /></div><div className="detail-grid"><div><div className="image-frame"><img src={selected.media?.secure_url} alt="Selected social post" /></div>{selected.productRequest && <div className="request-box"><Package size={17} /><div><strong>Product change</strong><p>{selected.productRequest}</p></div></div>}</div><div><p className="eyebrow">CAPTION</p><p className="caption-copy">{selected.captions?.instagramCaption}</p><p className="schedule-line"><CalendarDays size={16} /> {selected.scheduledFor ? prettyDate(selected.scheduledFor) : 'Publishing time not set'}</p>{selected.status === 'PRODUCT_CHANGE_REQUESTED' ? <button className="button dark full" onClick={() => setComposer(selected)}><RefreshCw size={16} /> Edit & resubmit</button> : null}{['APPROVED', 'SCHEDULED', 'PUBLISHING', 'PUBLISH_FAILED'].includes(selected.status) ? <button className="button dark full" onClick={() => setPublisher(selected)}><Send size={16} /> {selected.status === 'APPROVED' ? 'Publish with Blotato' : 'Manage Blotato publication'}</button> : null}{selected.status === 'APPROVED' ? <p className="approval-note"><Check size={15} /> Approved by client</p> : null}<History draft={selected} /></div></div></section> : <section className="empty-card"><Layers3 size={35} /><h2>Create your first post</h2><p>Choose an image, add a caption, then send it to the client review page.</p><button className="button dark" onClick={() => setComposer({})}><Plus size={16} /> New post</button></section>}</section>
-    <footer className="workspace-footer"><ImageIcon size={16} /><span>Cloudinary source files are preserved for audit. Blotato receives public media URLs only when you publish.</span></footer>
+    <SiteFooter />
     {composer && <Composer media={media} initial={composer.id ? composer : null} onClose={() => setComposer(null)} onSave={composer.id ? resubmit : create} working={loading} />}
     {publisher && <BlotatoPanel draft={publisher} onClose={() => setPublisher(null)} onUpdated={onDraftUpdated} />}
   </main>;
