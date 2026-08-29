@@ -42,7 +42,7 @@ function Pill({ status }) {
 function SiteFooter() {
   return <footer className="site-footer">
     <span>NutriFit Social Media</span>
-    <span>Managed by <a href="https://avadhbajaj.com" target="_blank" rel="noreferrer">Avadh Bajaj · avadhbajaj.com</a></span>
+    <span>Managed by <a href="https://avadhbajaj.com" target="_blank" rel="noreferrer">Avadh Bajaj</a></span>
   </footer>;
 }
 
