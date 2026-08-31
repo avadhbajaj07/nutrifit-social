@@ -12,6 +12,7 @@ import aiRoutes from './routes/ai.js';
 import settingsRoutes from './routes/settings.js';
 import blotatoRoutes from './routes/blotato.js';
 import adminAuthRoutes from './routes/adminAuth.js';
+import cronRoutes from './routes/cron.js';
 import { isPersistentStorageConfigured } from './services/storageService.js';
 import { requireAdmin } from './services/adminAuthService.js';
 
@@ -43,6 +44,7 @@ app.use('/api/email-approval', requireAdmin, emailApprovalRoutes);
 app.use('/api/ai', requireAdmin, aiRoutes);
 app.use('/api/settings', requireAdmin, settingsRoutes);
 app.use('/api/blotato', requireAdmin, blotatoRoutes);
+app.use('/api/cron', cronRoutes); // Vercel Cron + manual trigger (protected by CRON_SECRET)
 
 // Health check
 app.get('/api/health', (req, res) => {

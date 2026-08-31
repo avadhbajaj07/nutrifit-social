@@ -2,7 +2,7 @@ import express from 'express';
 import { getSettings, updateSettings, getLogs, addLog } from '../services/storageService.js';
 import { testBlotatoConnection, getBlotatoAccounts } from '../services/blotatoService.js';
 import { checkCloudinaryConnection } from '../services/cloudinaryService.js';
-import { initScheduler } from '../services/schedulerService.js';
+import { initScheduler, getScheduleStatusAsync } from '../services/schedulerService.js';
 
 const router = express.Router();
 
@@ -60,6 +60,15 @@ router.get('/logs', async (req, res) => {
     const { limit = 100 } = req.query;
     const logs = await getLogs(parseInt(limit));
     res.json({ logs });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/schedule', async (req, res) => {
+  try {
+    const status = await getScheduleStatusAsync();
+    res.json(status);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

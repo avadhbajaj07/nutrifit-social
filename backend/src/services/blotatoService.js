@@ -198,6 +198,7 @@ export async function publishToPlatforms({
   captionPinterest,
   pinterestTitle = 'NutriFitness Suisse - Conseils & Motivation',
   platforms = { instagram: true, pinterest: true },
+  resourceType = 'image',
   scheduledTime = null,
   useNextFreeSlot = false
 }) {
@@ -247,3 +248,4 @@ export async function publishToPlatforms({
 
   return results;
 }
+

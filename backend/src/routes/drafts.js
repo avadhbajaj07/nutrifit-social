@@ -1,10 +1,11 @@
 import express from 'express';
-import { getDrafts, getDraftById, createDraft, updateDraft, deleteDraft, addLog, getSettings, addPostHistory } from '../services/storageService.js';
+import { getDrafts, getDraftById, createDraft, updateDraft, deleteDraft, addLog, getSettings, addPostHistory, bulkResetApprovedToPending } from '../services/storageService.js';
 import { listMediaFromFolder } from '../services/cloudinaryService.js';
 import { generateViralPostContent } from '../services/aiCaptionService.js';
 import { createBlotatoPost, getBlotatoPostStatus, publishToPlatforms, uploadBlotatoMedia } from '../services/blotatoService.js';
 import { ensureClientReviewBatch } from '../services/reviewBatchService.js';
 import { requireAdmin } from '../services/adminAuthService.js';
+import { assignScheduledSlot } from '../services/schedulerService.js';
 
 const router = express.Router();
 const canAccessClientPortal = req => {
@@ -36,6 +37,18 @@ router.get('/client-link', requireAdmin, (req, res) => {
     token: getSettings().clientPortal?.shareToken,
     url: process.env.CLIENT_PORTAL_URL || null
   });
+});
+
+// Reset all APPROVED drafts back to PENDING_REVIEW for a new client review round.
+router.post('/reset-all-to-pending', requireAdmin, async (req, res) => {
+  try {
+    const note = req.body.note || 'Resubmitted for re-review — please read the caption carefully before approving.';
+    const count = await bulkResetApprovedToPending(note);
+    addLog('info', `${count} approved post(s) reset to PENDING_REVIEW for client re-review.`);
+    res.json({ success: true, count, message: `${count} post(s) sent back for client approval.` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 router.get('/client', requireClientPortalAccess, (req, res) => {
@@ -117,11 +130,21 @@ router.post('/:id/client-response', requireClientPortalAccess, (req, res) => {
         captions: { ...current.captions, instagramCaption: caption }
       });
     } else return res.status(400).json({ error: 'Unknown review action.' });
+
     const draft = await updateDraft(current.id, updates);
     addLog('info', `Client review for ${current.id}: ${action}.`);
+
+    // Auto-assign next free 07:00/17:00 CET slot when a post is approved
+    if ((action === 'approve' || action === 'caption_approve') && !scheduledFor) {
+      assignScheduledSlot(current.id).catch(err =>
+        addLog('warn', `Could not auto-assign slot for ${current.id}: ${err.message}`)
+      );
+    }
+
     res.json({ success: true, draft });
   }).catch(error => res.status(500).json({ error: error.message }));
 });
+
 
 router.post('/:id/publish-now', requireAdmin, async (req, res) => {
   try {

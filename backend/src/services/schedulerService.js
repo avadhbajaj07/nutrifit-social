@@ -1,172 +1,384 @@
-import { getSettings, addPostHistory, addLog } from './storageService.js';
-import { listMediaFromFolder } from './cloudinaryService.js';
-import { generateViralPostContent } from './aiCaptionService.js';
+import { getSettings, addPostHistory, addLog, getDrafts, getNextApprovedDraft, updateDraft } from './storageService.js';
 import { publishToPlatforms } from './blotatoService.js';
 
 let activeCronJobs = [];
 let isExecuting = false;
 
+// ─── The two daily CET slots ────────────────────────────────────────────────
+const SLOT_TIMES = ['07:00', '17:00']; // Europe/Zurich
+
+// ─── Convert HH:MM in Europe/Zurich to a UTC Date on a given calendar date ──
+function cetSlotToUTC(isoDateStr, timeStr) {
+  // isoDateStr = "2026-09-01", timeStr = "07:00"
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  // Build a date-time string that looks like it's in Zurich (we'll let the
+  // browser/node resolve it via toLocaleString trick)
+  const naiveLocal = new Date(`${isoDateStr}T${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')}:00`);
+  // Compute the UTC offset for Europe/Zurich at that moment
+  const zurichStr = naiveLocal.toLocaleString('en-US', { timeZone: 'Europe/Zurich' });
+  const zurichDate = new Date(zurichStr);
+  const offsetMs = naiveLocal - zurichDate; // CET offset in ms
+  return new Date(naiveLocal.getTime() + offsetMs);
+}
+
+// ─── Get today's date in Zurich as "YYYY-MM-DD" ──────────────────────────────
+function todayInZurich() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Zurich' }); // en-CA gives YYYY-MM-DD
+}
+
+// ─── Add N days to a YYYY-MM-DD string ──────────────────────────────────────
+function addDays(isoDateStr, n) {
+  const d = new Date(`${isoDateStr}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toLocaleDateString('en-CA', { timeZone: 'UTC' });
+}
+
 /**
- * Executes a single scheduled or manual post workflow:
- * 1. Fetch available media from Cloudinary folder
- * 2. Select next asset
- * 3. Generate French Swiss viral caption & Pinterest SEO data
- * 4. Publish via Blotato API (Instagram & Pinterest)
- * 5. Preserve the Cloudinary media for audit and reuse
- * 6. Record to post history and logs
+ * Returns the next free slot UTC Date that is not yet taken by any
+ * APPROVED / SCHEDULED / POSTED draft with a scheduledFor date.
+ *
+ * Slots: 07:00 and 17:00 Europe/Zurich, 2 per day.
+ * Starts from the current Zurich day and scans forward up to 90 days.
  */
-export async function executePostWorkflow(slotTheme = 'motivation', options = {}) {
+export async function getNextFreeSlot() {
+  const now = new Date();
+  const drafts = await getDrafts();
+
+  // Collect all already-taken scheduledFor timestamps (ISO strings) for active drafts
+  const taken = new Set(
+    drafts
+      .filter(d => ['APPROVED', 'SCHEDULED'].includes(d.status) && d.scheduledFor)
+      .map(d => new Date(d.scheduledFor).toISOString())
+  );
+
+  let date = todayInZurich();
+  for (let day = 0; day < 90; day++) {
+    for (const time of SLOT_TIMES) {
+      const slotUTC = cetSlotToUTC(date, time);
+      // Skip slots in the past (with 2-min buffer)
+      if (slotUTC.getTime() <= now.getTime() + 2 * 60 * 1000) continue;
+      // Skip slots already taken
+      if (taken.has(slotUTC.toISOString())) continue;
+      return slotUTC;
+    }
+    date = addDays(date, 1);
+  }
+  return null; // no slot found in 90 days (shouldn't happen)
+}
+
+/**
+ * Assigns the next free CET slot to a newly approved draft AND
+ * immediately schedules it in Blotato so Blotato handles the actual delivery.
+ * Called automatically when a post is approved.
+ */
+export async function assignScheduledSlot(draftId) {
+  const slot = await getNextFreeSlot();
+  if (!slot) {
+    addLog('warn', `[Scheduler] Could not find a free slot for draft ${draftId} in the next 90 days.`);
+    return null;
+  }
+
+  // Save scheduledFor on the draft first
+  const { getDraftById } = await import('./storageService.js');
+  const draft = await getDraftById(draftId);
+  if (!draft) return null;
+
+  await updateDraft(draftId, {
+    scheduledFor: slot.toISOString(),
+    status: 'SCHEDULED',
+    revisionHistory: [
+      ...(draft.revisionHistory || []),
+      {
+        revision: draft.revision || 1,
+        event: 'SCHEDULED',
+        at: new Date().toISOString(),
+        note: `Auto-scheduled for ${slot.toLocaleString('en-GB', { timeZone: 'Europe/Zurich', dateStyle: 'medium', timeStyle: 'short' })} CET via Blotato.`,
+        caption: draft.captions?.instagramCaption || '',
+        media: draft.media
+      }
+    ]
+  });
+
+  const zurichLabel = slot.toLocaleString('en-GB', {
+    timeZone: 'Europe/Zurich', weekday: 'short', month: 'short',
+    day: '2-digit', hour: '2-digit', minute: '2-digit'
+  });
+  addLog('info', `[Scheduler] Draft ${draftId} → Blotato scheduled for ${zurichLabel} CET.`);
+
+  // Push to Blotato as a scheduled post (Blotato handles the actual publish)
+  try {
+    const { publishToPlatforms } = await import('./blotatoService.js');
+    const settings = getSettings();
+    const publishResult = await publishToPlatforms({
+      mediaUrl: draft.media?.secure_url,
+      captionInstagram: draft.captions?.instagramCaption || '',
+      captionPinterest: draft.captions?.pinterestDescription || draft.captions?.instagramCaption || '',
+      pinterestTitle: draft.captions?.pinterestTitle || 'NutriFitness.ch',
+      platforms: {
+        instagram: settings.scheduling?.postToInstagram !== false,
+        pinterest: settings.scheduling?.postToPinterest !== false
+      },
+      resourceType: draft.media?.resource_type || 'image',
+      scheduledTime: slot.toISOString() // ← Blotato publishes at this exact time
+    });
+
+    addLog('success', `[Scheduler] Draft ${draftId} queued in Blotato for ${zurichLabel} CET. IG: ${publishResult.instagram?.success}, PIN: ${publishResult.pinterest?.success}`);
+
+    // Update draft with Blotato publication IDs
+    await updateDraft(draftId, {
+      blotatoPublication: {
+        instagram: publishResult.instagram,
+        pinterest: publishResult.pinterest,
+        scheduledTime: slot.toISOString(),
+        submittedAt: new Date().toISOString()
+      }
+    });
+  } catch (err) {
+    addLog('warn', `[Scheduler] Blotato scheduling call failed for ${draftId}: ${err.message}. Will still publish via cron fallback at slot time.`);
+  }
+
+  return slot;
+}
+
+// ─── Utility: parse "HH:MM" in Europe/Zurich and return next occurrence ──────
+function nextCETOccurrence(timeStr) {
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  const nowZurich = new Date(
+    new Date().toLocaleString('en-US', { timeZone: 'Europe/Zurich' })
+  );
+  const target = new Date(nowZurich);
+  target.setHours(hours, minutes, 0, 0);
+  if (target <= nowZurich) target.setDate(target.getDate() + 1);
+  const utcNow = Date.now();
+  const zurichNow = nowZurich.getTime();
+  const offset = utcNow - zurichNow;
+  return new Date(target.getTime() + offset);
+}
+
+// ─── Core: publish the next approved draft whose time has come ───────────────
+export async function publishNextApprovedDraft(slotLabel = 'scheduled') {
   if (isExecuting) {
-    addLog('warn', 'Une tâche de publication est déjà en cours d\'exécution.');
-    return { success: false, message: 'Publication déjà en cours' };
+    addLog('warn', `[AutoPublish] Skipped ${slotLabel} — another publish is already running.`);
+    return { success: false, message: 'Already executing' };
   }
 
   isExecuting = true;
   const startTime = Date.now();
-  const settings = getSettings();
+  const now = new Date();
+  addLog('info', `[AutoPublish] ${slotLabel} triggered. Looking for due approved post…`);
 
   try {
-    addLog('info', `Démarrage du cycle de publication automatique [Thème : ${slotTheme.toUpperCase()}]`);
+    // Pick the oldest APPROVED or SCHEDULED draft whose time has arrived.
+    // SCHEDULED = already sent to Blotato, but we keep cron as fallback in case Blotato mock/failed.
+    const allDrafts = await getDrafts();
+    const dueDrafts = allDrafts
+      .filter(d =>
+        ['APPROVED', 'SCHEDULED'].includes(d.status) &&
+        d.scheduledFor &&
+        new Date(d.scheduledFor) <= now
+      )
+      .sort((a, b) => new Date(a.scheduledFor) - new Date(b.scheduledFor));
 
-    // 1. Fetch media from Cloudinary folder
-    const mediaResult = await listMediaFromFolder(settings.cloudinary.folder);
-    const mediaList = mediaResult.resources || [];
+    // If a SCHEDULED draft was already sent to Blotato (not mock), skip cron publishing —
+    // Blotato is handling it. Only fire for mocks or APPROVED fallbacks.
+    const draft = dueDrafts.find(d => {
+      if (d.status === 'APPROVED') return true; // never reached Blotato
+      if (d.blotatoPublication?.instagram?.isMock || d.blotatoPublication?.pinterest?.isMock) return true; // mock, no real Blotato
+      return false; // real Blotato submission — let Blotato handle it
+    }) || (dueDrafts.length > 0 ? null : await getNextApprovedDraft());
 
-    if (mediaList.length === 0) {
-      const errMsg = `Aucun média disponible dans le dossier Cloudinary "${settings.cloudinary.folder}". Veuillez ajouter des images/vidéos.`;
-      addLog('warn', errMsg);
+    if (!draft) {
+      addLog('warn', `[AutoPublish] ${slotLabel}: No approved posts due. Skipping.`);
       isExecuting = false;
-      return { success: false, message: errMsg };
+      return { success: false, message: 'No approved posts due for publishing' };
     }
 
-    // Pick media (either user selected or next in queue)
-    const selectedMedia = options.selectedMediaId
-      ? mediaList.find(m => m.public_id === options.selectedMediaId) || mediaList[0]
-      : mediaList[0];
+    if (!draft.media?.secure_url) {
+      addLog('warn', `[AutoPublish] Draft ${draft.id} has no media URL. Skipping.`);
+      isExecuting = false;
+      return { success: false, message: 'Draft has no media URL' };
+    }
 
-    addLog('info', `Média sélectionné : ${selectedMedia.public_id} (${selectedMedia.aspect_ratio || '1:1'})`);
+    const scheduledLabel = draft.scheduledFor
+      ? new Date(draft.scheduledFor).toLocaleString('en-GB', { timeZone: 'Europe/Zurich', dateStyle: 'medium', timeStyle: 'short' }) + ' CET'
+      : 'unscheduled';
+    addLog('info', `[AutoPublish] Publishing draft ${draft.id} scheduled for ${scheduledLabel}`);
 
-    // 2. Generate Swiss French Viral Captions (Zero-link compliant)
-    const content = options.customCaption
-      ? {
-          instagramCaption: options.customCaption.instagramCaption,
-          pinterestTitle: options.customCaption.pinterestTitle || 'NutriFitness Suisse 🇨🇭',
-          pinterestDescription: options.customCaption.pinterestDescription || options.customCaption.instagramCaption,
-          theme: slotTheme
-        }
-      : await generateViralPostContent({
-          theme: slotTheme,
-          mediaTitle: selectedMedia.title || selectedMedia.filename,
-          customPrompt: options.customPrompt || ''
-        });
-
-    addLog('info', `Légende virale FR générée (Conformité Instagram : 100% sans lien brut)`);
-
-    // 3. Publish via Blotato API
+    const settings = getSettings();
     const publishResult = await publishToPlatforms({
-      mediaUrl: selectedMedia.secure_url,
-      captionInstagram: content.instagramCaption,
-      captionPinterest: content.pinterestDescription,
-      pinterestTitle: content.pinterestTitle,
+      mediaUrl: draft.media.secure_url,
+      captionInstagram: draft.captions?.instagramCaption || '',
+      captionPinterest: draft.captions?.pinterestDescription || draft.captions?.instagramCaption || '',
+      pinterestTitle: draft.captions?.pinterestTitle || 'NutriFitness.ch',
       platforms: {
-        instagram: settings.scheduling.postToInstagram !== false,
-        pinterest: settings.scheduling.postToPinterest !== false
+        instagram: settings.scheduling?.postToInstagram !== false,
+        pinterest: settings.scheduling?.postToPinterest !== false
       },
-      resourceType: selectedMedia.resource_type || 'image'
+      resourceType: draft.media?.resource_type || 'image'
     });
 
-    const isPublishedOk =
-      (publishResult.instagram?.success || !settings.scheduling.postToInstagram) &&
-      (publishResult.pinterest?.success || !settings.scheduling.postToPinterest);
+    const successful =
+      (publishResult.instagram?.success || settings.scheduling?.postToInstagram === false) &&
+      (publishResult.pinterest?.success || settings.scheduling?.postToPinterest === false);
 
-    // 4. Record to history. Source media is never deleted by a publish workflow.
-    const historyEntry = await addPostHistory({
+    const nowISO = now.toISOString();
+    await updateDraft(draft.id, {
+      status: successful ? 'POSTED' : 'PUBLISH_FAILED',
+      publishedAt: nowISO,
+      revisionHistory: [
+        ...(draft.revisionHistory || []),
+        {
+          revision: draft.revision || 1,
+          event: successful ? 'PUBLISHED' : 'PUBLISH_FAILED',
+          at: nowISO,
+          note: `Auto-published via ${slotLabel} slot.`,
+          caption: draft.captions?.instagramCaption || '',
+          media: draft.media
+        }
+      ]
+    });
+
+    await addPostHistory({
+      draftId: draft.id,
       media: {
-        publicId: selectedMedia.public_id,
-        url: selectedMedia.secure_url,
-        format: selectedMedia.format,
-        resourceType: selectedMedia.resource_type || 'image',
-        aspectRatio: selectedMedia.aspect_ratio
+        publicId: draft.media.public_id,
+        url: draft.media.secure_url,
+        format: draft.media.format,
+        resourceType: draft.media.resource_type || 'image',
+        aspectRatio: draft.media.aspect_ratio
       },
-      captions: content,
+      captions: draft.captions,
       platforms: {
         instagram: publishResult.instagram,
         pinterest: publishResult.pinterest
       },
       autoDeleted: false,
-      slotTheme,
-      status: isPublishedOk ? 'COMPLETED' : 'PARTIAL_FAILED',
+      slotTheme: draft.theme || slotLabel,
+      slotLabel,
+      scheduledFor: draft.scheduledFor,
+      status: successful ? 'COMPLETED' : 'PARTIAL_FAILED',
       durationMs: Date.now() - startTime
     });
 
-    addLog('success', `Cycle terminé avec succès en ${(Date.now() - startTime) / 1000}s !`);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    if (successful) {
+      addLog('success', `[AutoPublish] Draft ${draft.id} published in ${elapsed}s via ${slotLabel}.`);
+    } else {
+      addLog('error', `[AutoPublish] Draft ${draft.id} failed after ${elapsed}s. IG: ${publishResult.instagram?.success}, PIN: ${publishResult.pinterest?.success}`);
+    }
 
     isExecuting = false;
-    return {
-      success: isPublishedOk,
-      historyEntry,
-      publishResult
-    };
+    return { success: successful, draftId: draft.id, publishResult };
+
   } catch (error) {
     isExecuting = false;
-    addLog('error', `Erreur critique dans le cycle de publication : ${error.message}`);
-    return {
-      success: false,
-      error: error.message
-    };
+    addLog('error', `[AutoPublish] Critical error in ${slotLabel}: ${error.message}`);
+    return { success: false, error: error.message };
   }
 }
 
-/**
- * Initializes and re-schedules the 3 daily cron jobs
- */
-export function initScheduler() {
-  // Stop existing cron jobs
-  activeCronJobs.forEach(job => job.stop());
-  activeCronJobs = [];
-
-  // The approval board schedules approved posts directly with Blotato. The old
-  // folder-driven cron publisher remains disabled to prevent accidental posts.
-  addLog('info', 'Planificateur automatique historique désactivé. Utilisez Blotato depuis un post approuvé.');
+// ─── Legacy wrapper ───────────────────────────────────────────────────────────
+export async function executePostWorkflow(slotTheme = 'motivation', options = {}) {
+  return publishNextApprovedDraft(slotTheme);
 }
 
-/**
- * Calculate upcoming scheduled post times
- */
+// ─── Scheduler: 07:00 and 17:00 Europe/Zurich daily ─────────────────────────
+const DAILY_SLOTS = [
+  { time: '07:00', label: 'Morning (07:00 CET)' },
+  { time: '17:00', label: 'Evening (17:00 CET)' }
+];
+
+function scheduleSlot(slot) {
+  const fire = () => {
+    publishNextApprovedDraft(slot.label);
+    const next = nextCETOccurrence(slot.time);
+    const delayMs = next.getTime() - Date.now();
+    addLog('info', `[Scheduler] Next ${slot.label} in ${Math.round(delayMs / 60000)} min.`);
+    return setTimeout(fire, delayMs);
+  };
+  const next = nextCETOccurrence(slot.time);
+  const delayMs = next.getTime() - Date.now();
+  addLog('info', `[Scheduler] ${slot.label} — next run in ${Math.round(delayMs / 60000)} min (${next.toISOString()}).`);
+  return setTimeout(fire, delayMs);
+}
+
+export function initScheduler() {
+  activeCronJobs.forEach(t => clearTimeout(t));
+  activeCronJobs = [];
+  addLog('info', '[Scheduler] Auto-publish initialized: 07:00 + 17:00 CET (approved posts only).');
+  for (const slot of DAILY_SLOTS) {
+    activeCronJobs.push(scheduleSlot(slot));
+  }
+}
+
+// ─── Status for Dashboard ────────────────────────────────────────────────────
+export async function getScheduleStatusAsync() {
+  const settings = getSettings();
+  const now = new Date();
+
+  // Build upcoming slots with their assigned drafts
+  const allDrafts = await getDrafts();
+  const scheduledDrafts = allDrafts
+    .filter(d => ['APPROVED', 'SCHEDULED'].includes(d.status) && d.scheduledFor)
+    .sort((a, b) => new Date(a.scheduledFor) - new Date(b.scheduledFor));
+
+  // Build slot rows for next 7 days
+  const rows = [];
+  let date = todayInZurich();
+  for (let day = 0; day < 7; day++) {
+    for (const time of SLOT_TIMES) {
+      const slotUTC = cetSlotToUTC(date, time);
+      if (slotUTC.getTime() < now.getTime() - 60 * 1000) continue; // skip past slots
+      const assigned = scheduledDrafts.find(d => {
+        const diff = Math.abs(new Date(d.scheduledFor) - slotUTC);
+        return diff < 60 * 1000; // within 1 min
+      });
+      const countdownMinutes = Math.round((slotUTC - now) / 60000);
+      rows.push({
+        id: `${date}-${time}`,
+        date,
+        time,
+        slotUTC: slotUTC.toISOString(),
+        label: `${time} CET`,
+        countdownMinutes,
+        isNext: false,
+        assignedDraft: assigned ? {
+          id: assigned.id,
+          media: assigned.media,
+          theme: assigned.theme
+        } : null
+      });
+    }
+    date = addDays(date, 1);
+  }
+  if (rows.length > 0) rows[0].isNext = true;
+
+  return {
+    enabled: true,
+    timezone: 'Europe/Zurich',
+    slots: rows,
+    isExecuting,
+    folder: settings.cloudinary?.folder,
+    scheduledDraftCount: scheduledDrafts.length
+  };
+}
+
+// Sync version for backward compat
 export function getScheduleStatus() {
   const settings = getSettings();
-  const slots = settings.scheduling.slots || [];
-
   const now = new Date();
-  const upcoming = slots.map(s => {
-    const [hours, minutes] = s.time.split(':').map(Number);
-    const scheduledDate = new Date(now);
-    scheduledDate.setHours(hours, minutes, 0, 0);
-
-    if (scheduledDate < now) {
-      // scheduled for next day
-      scheduledDate.setDate(scheduledDate.getDate() + 1);
-    }
-
-    const diffMinutes = Math.round((scheduledDate - now) / 60000);
-
+  const slots = DAILY_SLOTS.map(slot => {
+    const nextRun = nextCETOccurrence(slot.time);
     return {
-      ...s,
-      nextRun: scheduledDate.toISOString(),
-      countdownMinutes: diffMinutes,
+      id: slot.time,
+      time: slot.time,
+      label: slot.label,
+      theme: slot.time === '07:00' ? 'motivation' : 'workout',
+      nextRun: nextRun.toISOString(),
+      countdownMinutes: Math.round((nextRun - now) / 60000),
       isNext: false
     };
   }).sort((a, b) => new Date(a.nextRun) - new Date(b.nextRun));
-
-  if (upcoming.length > 0) {
-    upcoming[0].isNext = true;
-  }
-
-  return {
-    enabled: false,
-    timezone: settings.scheduling.timezone,
-    autoDeleteMediaOnSuccess: false,
-    slots: upcoming,
-    isExecuting
-  };
+  if (slots.length > 0) slots[0].isNext = true;
+  return { enabled: true, timezone: 'Europe/Zurich', slots, isExecuting, folder: settings.cloudinary?.folder };
 }

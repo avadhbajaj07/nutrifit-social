@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle, CalendarDays, Check, CheckCircle2, ChevronRight, Clock3, Copy,
-  Image as ImageIcon, Layers3, Link, Package, Pencil, Plus, RefreshCw, Send, X, XCircle
+  Image as ImageIcon, Layers3, Link, Package, Pencil, Plus, RefreshCw, RotateCcw, Send, X, XCircle
 } from 'lucide-react';
 import BlotatoPanel from './BlotatoPanel';
 
@@ -63,16 +63,14 @@ function ClientActions({ draft, onRespond, working }) {
   const [panel, setPanel] = useState(null);
   const [product, setProduct] = useState('');
   const [caption, setCaption] = useState(draft.captions?.instagramCaption || '');
-  const [date, setDate] = useState(dateValue(draft.scheduledFor));
   const [note, setNote] = useState('');
 
-  useEffect(() => { setCaption(draft.captions?.instagramCaption || ''); setDate(dateValue(draft.scheduledFor)); setPanel(null); }, [draft.id, draft.captions?.instagramCaption, draft.scheduledFor]);
-  const send = (action, payload = {}) => onRespond(draft.id, { action, scheduledFor: genevaDateToIso(date), ...payload });
+  useEffect(() => { setCaption(draft.captions?.instagramCaption || ''); setPanel(null); }, [draft.id, draft.captions?.instagramCaption]);
+  const send = (action, payload = {}) => onRespond(draft.id, { action, ...payload });
 
   if (draft.status !== 'PENDING_REVIEW') return <div className="client-result"><Pill status={draft.status} />{draft.productRequest && <p>{draft.productRequest}</p>}</div>;
   return <section className="review-actions">
     <p className="small-label">Choose one response</p>
-    <div className="date-field"><CalendarDays size={16} /><label>Preferred publishing time · Geneva <input type="datetime-local" value={date} onChange={e => setDate(e.target.value)} /></label></div>
     <button className="action primary" disabled={working} onClick={() => send('approve')}><CheckCircle2 size={17} /> Approve</button>
     <button className="action" onClick={() => setPanel(panel === 'product' ? null : 'product')}><Package size={17} /> Keep design, change product</button>
     {panel === 'product' && <div className="inline-form"><input autoFocus value={product} onChange={e => setProduct(e.target.value)} placeholder="Which product should be shown?" /><button disabled={working || !product.trim()} onClick={() => send('product_change', { productRequest: product })}>Send request</button></div>}
@@ -97,7 +95,6 @@ function ClientPortal({ drafts, onRespond, loading, notice }) {
         <div className="image-frame"><img src={current.media?.secure_url} alt="Post awaiting review" /></div>
         <div className="client-copy"><div className="card-heading"><div><p className="eyebrow">REVISION {current.revision || 1}</p><h2>Caption</h2></div><Pill status={current.status} /></div>
           <p className="caption-copy">{current.captions?.instagramCaption}</p>
-          {current.scheduledFor && <p className="schedule-line"><Clock3 size={16} /> Posting date: {prettyDate(current.scheduledFor)}</p>}
           <ClientActions draft={current} onRespond={onRespond} working={loading} />
           <History draft={current} />
         </div>
@@ -126,9 +123,14 @@ function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink, onDr
   const [selectedId, setSelectedId] = useState('');
   const [composer, setComposer] = useState(null);
   const [publisher, setPublisher] = useState(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const filtered = useMemo(() => filter === 'ALL' ? drafts : drafts.filter(draft => draft.status === filter), [drafts, filter]);
   useEffect(() => { if (!selectedId && filtered[0]) setSelectedId(filtered[0].id); }, [selectedId, filtered]);
   const selected = drafts.find(draft => draft.id === selectedId) || filtered[0];
+
+  const approvedCount = drafts.filter(d => d.status === 'APPROVED').length;
+
   const create = async data => {
     const response = await fetch('/api/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
     if (!response.ok) throw new Error((await response.json()).error || 'Could not create the post.');
@@ -140,7 +142,26 @@ function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink, onDr
     setComposer(null); await refresh('Updated post sent back for a new client review.');
   };
   const copyLink = async () => { await navigator.clipboard?.writeText(clientLink); refresh('Private client review link copied.'); };
-  return <main className="owner-page"><header className="owner-header"><div><p className="eyebrow">NUTRIFITNESS • CREATOR</p><h1>Posts</h1><p>Create, review and publish from one place.</p></div><div className="header-actions"><button className="button ghost" disabled={!clientLink} onClick={copyLink}><Copy size={16} /> Copy review link</button><a className="button ghost" target="_blank" rel="noreferrer" href={clientLink || '#'}><Link size={16} /> Open client view</a><button className="button dark" onClick={() => setComposer({})}><Plus size={17} /> New post</button></div></header>
+
+  const handleResetAll = async () => {
+    setResetting(true);
+    try {
+      const res = await fetch('/api/drafts/reset-all-to-pending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: 'Resubmitted for re-review — please read each caption carefully before approving.' })
+      });
+      const data = await res.json();
+      setShowResetConfirm(false);
+      await refresh(data.message || `${data.count} posts sent back for client approval.`);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  return <main className="owner-page"><header className="owner-header"><div><p className="eyebrow">NUTRIFITNESS • CREATOR</p><h1>Posts</h1><p>Create, review and publish from one place.</p></div><div className="header-actions"><button className="button ghost" disabled={!clientLink} onClick={copyLink}><Copy size={16} /> Copy review link</button><a className="button ghost" target="_blank" rel="noreferrer" href={clientLink || '#'}><Link size={16} /> Open client view</a>{approvedCount > 0 && <button className="button ghost" onClick={() => setShowResetConfirm(true)} title={`Reset ${approvedCount} approved post(s) for re-review`}><RotateCcw size={16} /> Re-send for approval ({approvedCount})</button>}<button className="button dark" onClick={() => setComposer({})}><Plus size={17} /> New post</button></div></header>
     {notice && <div className="notice success"><CheckCircle2 size={17} />{notice}</div>}
     <section className="stats"><div><Clock3 /><strong>{drafts.filter(d => d.status === 'PENDING_REVIEW').length}</strong><span>Waiting for client</span></div><div><Package /><strong>{drafts.filter(d => d.status === 'PRODUCT_CHANGE_REQUESTED').length}</strong><span>Needs rework</span></div><div><CheckCircle2 /><strong>{drafts.filter(d => d.status === 'APPROVED').length}</strong><span>Approved</span></div><div><XCircle /><strong>{drafts.filter(d => d.status === 'REJECTED').length}</strong><span>Rejected</span></div></section>
     <section className="board"><aside className="post-list"><div className="filter-row">{['ALL', ...Object.keys(STATUS)].map(item => <button className={filter === item ? 'active' : ''} onClick={() => { setFilter(item); setSelectedId(''); }} key={item}>{item === 'ALL' ? 'All' : STATUS[item].label}</button>)}</div>
@@ -150,6 +171,29 @@ function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink, onDr
     <SiteFooter />
     {composer && <Composer media={media} initial={composer.id ? composer : null} onClose={() => setComposer(null)} onSave={composer.id ? resubmit : create} working={loading} />}
     {publisher && <BlotatoPanel draft={publisher} onClose={() => setPublisher(null)} onUpdated={onDraftUpdated} />}
+    {showResetConfirm && (
+      <div className="modal-backdrop">
+        <div className="modal-card" style={{ maxWidth: 440 }}>
+          <div className="card-heading">
+            <h2 style={{ fontSize: 18, margin: 0 }}>Re-send {approvedCount} post{approvedCount !== 1 ? 's' : ''} for approval?</h2>
+            <button className="icon-button close" onClick={() => setShowResetConfirm(false)}><X size={18} /></button>
+          </div>
+          <p style={{ color: '#6b7280', fontSize: 13, margin: '14px 0' }}>
+            All <strong>{approvedCount} approved</strong> post{approvedCount !== 1 ? 's' : ''} will be reset to <strong>Waiting for client</strong>. The client will need to review each caption carefully and re-approve them.
+          </p>
+          <p style={{ color: '#92400e', background: '#fef3c7', padding: '10px 12px', borderRadius: 7, fontSize: 12, margin: '0 0 18px' }}>
+            ⚠️ This cannot be undone. No posts will be deleted — only their status changes.
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="button ghost" onClick={() => setShowResetConfirm(false)}>Cancel</button>
+            <button className="button dark" disabled={resetting} onClick={handleResetAll}>
+              <RotateCcw size={15} />
+              {resetting ? 'Resetting…' : `Re-send ${approvedCount} post${approvedCount !== 1 ? 's' : ''}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   </main>;
 }
 

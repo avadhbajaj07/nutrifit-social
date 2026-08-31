@@ -1,32 +1,65 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Clock,
   CheckCircle2,
   Trash2,
   Sparkles,
-  Play,
   ArrowRight,
   ShieldCheck,
   Zap,
   Image as ImageIcon,
   Calendar,
-  Check
+  Check,
+  RefreshCw
 } from 'lucide-react';
 
 export default function DashboardOverview({
-  schedule,
   mediaList,
   history,
-  onTriggerSlot,
-  isPublishing,
+  drafts,
   onNavigateTab
 }) {
+  const [schedule, setSchedule] = useState(null);
+  const [loadingSchedule, setLoadingSchedule] = useState(true);
   const nextMedia = mediaList?.[0];
+
   const completedTodayCount = history.filter(h => {
     const postDate = new Date(h.timestamp).toDateString();
-    const today = new Date().toDateString();
-    return postDate === today;
+    return postDate === new Date().toDateString();
   }).length;
+
+  const approvedCount = (drafts || []).filter(d => d.status === 'APPROVED').length;
+
+  const fetchSchedule = async () => {
+    setLoadingSchedule(true);
+    try {
+      const res = await fetch('/api/settings/schedule');
+      const data = await res.json();
+      setSchedule(data);
+    } catch (e) {
+      console.error('Could not load schedule', e);
+    } finally {
+      setLoadingSchedule(false);
+    }
+  };
+
+  useEffect(() => { fetchSchedule(); }, []);
+
+  // Group schedule slots by date
+  const slotsByDate = {};
+  (schedule?.slots || []).forEach(slot => {
+    if (!slotsByDate[slot.date]) slotsByDate[slot.date] = [];
+    slotsByDate[slot.date].push(slot);
+  });
+
+  const formatDate = (isoDate) => {
+    const d = new Date(`${isoDate}T12:00:00Z`);
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Zurich' });
+    const tomorrow = new Date(Date.now() + 86400000).toLocaleDateString('en-CA', { timeZone: 'Europe/Zurich' });
+    if (isoDate === today) return 'Today';
+    if (isoDate === tomorrow) return 'Tomorrow';
+    return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  };
 
   return (
     <div className="space-y-6">
@@ -43,7 +76,7 @@ export default function DashboardOverview({
             </h3>
             <p className="text-[11px] text-emerald-600 flex items-center gap-1 mt-1">
               <CheckCircle2 className="w-3 h-3" />
-              Folder: {schedule?.folder || 'nutrifitness'}
+              Cloudinary folder
             </p>
           </div>
           <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500">
@@ -55,11 +88,11 @@ export default function DashboardOverview({
           <div>
             <p className="text-xs font-medium text-gray-500">Posts Today</p>
             <h3 className="text-2xl font-bold text-gray-900 mt-1">
-              {completedTodayCount} <span className="text-gray-400">/ 3</span>
+              {completedTodayCount} <span className="text-gray-400">/ 2</span>
             </h3>
             <p className="text-[11px] text-gray-400 flex items-center gap-1 mt-1">
               <Clock className="w-3 h-3" />
-              3 daily slots (Europe/Zurich)
+              07:00 + 17:00 CET
             </p>
           </div>
           <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500">
@@ -69,15 +102,19 @@ export default function DashboardOverview({
 
         <div className="bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-between">
           <div>
-            <p className="text-xs font-medium text-gray-500">Auto-Cleanup</p>
-            <h3 className="text-sm font-bold text-emerald-600 mt-1 flex items-center gap-1.5">
-              <Check className="w-4 h-4" />
-              Enabled
+            <p className="text-xs font-medium text-gray-500">Approved & Queued</p>
+            <h3 className={`text-2xl font-bold mt-1 ${approvedCount > 0 ? 'text-emerald-600' : 'text-amber-500'}`}>
+              {approvedCount}
+              <span className="text-xs font-normal text-gray-400 ml-1">posts</span>
             </h3>
-            <p className="text-[11px] text-gray-400 mt-1">Removed on successful publish</p>
+            <p className="text-[11px] text-gray-400 mt-1">
+              {approvedCount > 0
+                ? `~${Math.ceil(approvedCount / 2)} day${Math.ceil(approvedCount / 2) !== 1 ? 's' : ''} of content`
+                : 'No approved posts yet'}
+            </p>
           </div>
           <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500">
-            <Trash2 className="w-5 h-5" />
+            <CheckCircle2 className="w-5 h-5" />
           </div>
         </div>
 
@@ -97,94 +134,130 @@ export default function DashboardOverview({
 
       </div>
 
-      {/* Schedule + Next Media */}
+      {/* 7-Day Schedule + Next Media */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-        {/* Daily Schedule */}
+        {/* 7-Day Calendar */}
         <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-gray-100 pb-4">
             <div>
               <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-gray-500" />
-                Daily Publishing Schedule
+                Publishing Schedule
               </h2>
               <p className="text-xs text-gray-400 mt-0.5">
-                Timezone: Europe/Zurich · Instagram & Pinterest
+                2 posts/day · 07:00 & 17:00 CET · approved posts only
               </p>
             </div>
-            <span className="text-xs px-2 py-1 rounded-full font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-              ● Active
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs px-2 py-1 rounded-full font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                ● Auto-active
+              </span>
+              <button
+                onClick={fetchSchedule}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                title="Refresh schedule"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
-          <div className="space-y-3">
-            {schedule?.slots?.map((slot, index) => {
-              const themeConfig = {
-                motivation: {
-                  icon: '🌅',
-                  label: 'Slot 1 — Morning (Motivation)',
-                  desc: 'Inspiring hook, discipline, and morning routine tips',
-                  accent: 'border-amber-200 bg-amber-50'
-                },
-                nutrition: {
-                  icon: '🥗',
-                  label: 'Slot 2 — Noon (Nutrition)',
-                  desc: 'Balanced plate tips, protein, quick meal prep',
-                  accent: 'border-emerald-200 bg-emerald-50'
-                },
-                workout: {
-                  icon: '🏋️',
-                  label: 'Slot 3 — Evening (Workout)',
-                  desc: 'Circuit training, technique tips, engagement call',
-                  accent: 'border-blue-200 bg-blue-50'
-                }
-              }[slot.theme] || {
-                icon: '⚡',
-                label: slot.label || slot.time,
-                desc: 'Scheduled auto-publish',
-                accent: 'border-gray-200 bg-gray-50'
-              };
+          {loadingSchedule ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="h-14 bg-gray-100 rounded-lg animate-pulse" />
+              ))}
+            </div>
+          ) : Object.keys(slotsByDate).length === 0 ? (
+            <div className="text-center py-8 text-gray-400 text-xs">
+              No upcoming slots found.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {Object.entries(slotsByDate).map(([date, slots]) => (
+                <div key={date}>
+                  {/* Date header */}
+                  <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5 px-1">
+                    {formatDate(date)}
+                    <span className="ml-2 text-gray-300 font-normal normal-case tracking-normal">
+                      {date}
+                    </span>
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {slots.map(slot => {
+                      const isMorning = slot.time === '07:00';
+                      const hasPost = Boolean(slot.assignedDraft);
+                      const isNext = slot.isNext;
+                      return (
+                        <div
+                          key={slot.id}
+                          className={`p-3 rounded-lg border flex items-center justify-between gap-2 ${
+                            isNext
+                              ? 'border-emerald-300 bg-emerald-50'
+                              : hasPost
+                              ? 'border-gray-200 bg-white'
+                              : 'border-dashed border-gray-200 bg-gray-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">{isMorning ? '🌅' : '🌆'}</span>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-bold text-gray-700 font-mono">{slot.time}</span>
+                                {isNext && (
+                                  <span className="text-[9px] bg-emerald-600 text-white font-bold px-1.5 py-0.5 rounded-full uppercase">
+                                    Next
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-gray-400 mt-0.5">
+                                {isMorning ? 'Morning' : 'Evening'}
+                                {isNext && slot.countdownMinutes != null && (
+                                  <span className="ml-1 text-emerald-600">· {slot.countdownMinutes < 60
+                                    ? `${slot.countdownMinutes}min`
+                                    : `${Math.round(slot.countdownMinutes / 60)}h`}
+                                  </span>
+                                )}
+                              </p>
+                            </div>
+                          </div>
 
-              return (
-                <div
-                  key={slot.id || index}
-                  className={`p-4 rounded-lg border ${themeConfig.accent} flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-colors`}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="text-xl">{themeConfig.icon}</span>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-bold px-2 py-0.5 rounded bg-white border border-gray-200 text-gray-700 font-mono">
-                          {slot.time}
-                        </span>
-                        <h4 className="font-semibold text-sm text-gray-800">{themeConfig.label}</h4>
-                        {slot.isNext && (
-                          <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white">
-                            Next ({slot.countdownMinutes} min)
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">{themeConfig.desc}</p>
-                      <div className="flex items-center gap-2 mt-1.5 text-[11px] text-gray-400">
-                        <span>📸 Instagram + 📌 Pinterest</span>
-                        <span>·</span>
-                        <span>🗑 Auto-remove from Cloudinary</span>
-                      </div>
-                    </div>
+                          {hasPost ? (
+                            <div className="w-9 h-11 rounded overflow-hidden bg-gray-100 border border-gray-200 shrink-0">
+                              {slot.assignedDraft.media?.secure_url ? (
+                                <img
+                                  src={slot.assignedDraft.media.secure_url}
+                                  alt="Scheduled"
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-gray-300">
+                                  <ImageIcon className="w-3 h-3" />
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[10px] text-gray-400 shrink-0">Empty</span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-
-                  <button
-                    onClick={() => onTriggerSlot(slot.theme)}
-                    disabled={isPublishing || (mediaList?.length === 0)}
-                    className="self-end sm:self-center flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-white hover:bg-gray-900 hover:text-white text-gray-700 border border-gray-200 hover:border-gray-900 transition-colors disabled:opacity-40"
-                  >
-                    <Play className="w-3 h-3 fill-current" />
-                    Test slot
-                  </button>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          )}
+
+          <p className="text-[11px] text-gray-400 pt-2 border-t border-gray-100">
+            Slots fill automatically when the client approves posts. &nbsp;
+            <button
+              className="underline text-gray-500 hover:text-gray-800"
+              onClick={() => onNavigateTab?.('approval')}
+            >
+              Go to Client Approval →
+            </button>
+          </p>
         </div>
 
         {/* Next Media Preview */}
@@ -196,7 +269,7 @@ export default function DashboardOverview({
                 Next in Queue
               </h3>
               <button
-                onClick={() => onNavigateTab('cloudinary')}
+                onClick={() => onNavigateTab?.('cloudinary')}
                 className="text-xs text-emerald-600 hover:underline flex items-center gap-1"
               >
                 View all ({mediaList?.length || 0})
@@ -239,7 +312,7 @@ export default function DashboardOverview({
 
           <div className="pt-3 border-t border-gray-100">
             <button
-              onClick={() => onNavigateTab('studio')}
+              onClick={() => onNavigateTab?.('studio')}
               className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg bg-gray-100 hover:bg-gray-200 text-xs font-semibold text-gray-700 transition-colors"
             >
               <Sparkles className="w-4 h-4 text-amber-500" />

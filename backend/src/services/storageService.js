@@ -355,6 +355,50 @@ export async function getLogs(limit = 100) {
   return (data || []).map(row => row.data);
 }
 
+/**
+ * Returns the oldest APPROVED draft that hasn't been posted yet.
+ * Used by the auto-publish cron to pick what to post next.
+ */
+export async function getNextApprovedDraft() {
+  const drafts = await getDrafts();
+  const approved = drafts
+    .filter(d => d.status === 'APPROVED')
+    .sort((a, b) => new Date(a.approvedAt || a.createdAt) - new Date(b.approvedAt || b.createdAt));
+  return approved[0] || null;
+}
+
+/**
+ * Resets all APPROVED drafts back to PENDING_REVIEW so the client
+ * can review them again (e.g. if they approved without reading the captions).
+ * Returns the number of drafts reset.
+ */
+export async function bulkResetApprovedToPending(note = 'Resubmitted for re-review — please read the caption carefully before approving.') {
+  const drafts = await getDrafts();
+  const toReset = drafts.filter(d => d.status === 'APPROVED');
+  let count = 0;
+  for (const draft of toReset) {
+    const revision = (draft.revision || 1) + 1;
+    await updateDraft(draft.id, {
+      status: 'PENDING_REVIEW',
+      revision,
+      approvedAt: null,
+      revisionHistory: [
+        ...(draft.revisionHistory || []),
+        {
+          revision,
+          event: 'RESUBMITTED',
+          at: new Date().toISOString(),
+          note,
+          caption: draft.captions?.instagramCaption || '',
+          media: draft.media
+        }
+      ]
+    });
+    count++;
+  }
+  return count;
+}
+
 export function isPersistentStorageConfigured() {
   return Boolean(getSupabase());
 }
