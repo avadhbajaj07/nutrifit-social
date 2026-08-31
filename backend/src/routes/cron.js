@@ -41,4 +41,28 @@ router.post('/trigger', async (req, res) => {
   }
 });
 
+/**
+ * Resets all posts (approved, rejected, product change requested) back to PENDING_REVIEW
+ */
+router.post('/reset-all', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (secret) {
+    const auth = req.headers.authorization;
+    if (auth !== `Bearer ${secret}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
+
+  try {
+    const { bulkResetApprovedToPending } = await import('../services/storageService.js');
+    const note = req.body?.note || 'Resubmitted for client review — please read each caption carefully.';
+    const count = await bulkResetApprovedToPending(note);
+    addLog('info', `[ResetAll] Reset ${count} posts back to PENDING_REVIEW.`);
+    res.json({ success: true, count, message: `Successfully reset ${count} posts back to PENDING_REVIEW.` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
+

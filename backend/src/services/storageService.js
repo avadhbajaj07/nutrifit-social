@@ -368,13 +368,13 @@ export async function getNextApprovedDraft() {
 }
 
 /**
- * Resets all APPROVED drafts back to PENDING_REVIEW so the client
- * can review them again (e.g. if they approved without reading the captions).
+ * Resets all non-posted drafts (APPROVED, SCHEDULED, REJECTED, PRODUCT_CHANGE_REQUESTED)
+ * back to PENDING_REVIEW so the client can review everything fresh.
  * Returns the number of drafts reset.
  */
-export async function bulkResetApprovedToPending(note = 'Resubmitted for re-review — please read the caption carefully before approving.') {
+export async function bulkResetApprovedToPending(note = 'Resubmitted for client review — please read each caption carefully.') {
   const drafts = await getDrafts();
-  const toReset = drafts.filter(d => d.status === 'APPROVED');
+  const toReset = drafts.filter(d => ['APPROVED', 'SCHEDULED', 'REJECTED', 'PRODUCT_CHANGE_REQUESTED', 'PUBLISH_FAILED'].includes(d.status));
   let count = 0;
   for (const draft of toReset) {
     const revision = (draft.revision || 1) + 1;
@@ -382,6 +382,10 @@ export async function bulkResetApprovedToPending(note = 'Resubmitted for re-revi
       status: 'PENDING_REVIEW',
       revision,
       approvedAt: null,
+      scheduledFor: null,
+      productRequest: '',
+      clientFeedback: '',
+      blotatoPublication: null,
       revisionHistory: [
         ...(draft.revisionHistory || []),
         {
@@ -398,6 +402,7 @@ export async function bulkResetApprovedToPending(note = 'Resubmitted for re-revi
   }
   return count;
 }
+
 
 export function isPersistentStorageConfigured() {
   return Boolean(getSupabase());
