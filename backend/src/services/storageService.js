@@ -403,7 +403,24 @@ export async function bulkResetApprovedToPending(note = 'Resubmitted for client 
   return count;
 }
 
+/**
+ * Deletes all drafts from store / database (e.g. when designs are rejected or media purged)
+ */
+export async function deleteAllDrafts() {
+  const supabase = getSupabase();
+  if (!supabase) {
+    const store = loadLocalStore();
+    const count = (store.drafts || []).length;
+    store.drafts = [];
+    saveLocalStore(store);
+    return count;
+  }
+  const { data, error } = await supabase.from('nutrifitness_drafts').delete().neq('id', '__keep_none__').select('id');
+  if (error) throw error;
+  return data?.length || 0;
+}
 
 export function isPersistentStorageConfigured() {
   return Boolean(getSupabase());
 }
+

@@ -101,17 +101,29 @@ router.post('/reset-all', async (req, res) => {
     }
   }
 
+/**
+ * Clears all drafts from the review board
+ */
+router.post('/clear-all', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (secret) {
+    const auth = req.headers.authorization;
+    if (auth !== `Bearer ${secret}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
+
   try {
-    const { bulkResetApprovedToPending } = await import('../services/storageService.js');
-    const note = req.body?.note || 'Resubmitted for client review — please read each caption carefully.';
-    const count = await bulkResetApprovedToPending(note);
-    addLog('info', `[ResetAll] Reset ${count} posts back to PENDING_REVIEW.`);
-    res.json({ success: true, count, message: `Successfully reset ${count} posts back to PENDING_REVIEW.` });
+    const { deleteAllDrafts, addLog } = await import('../services/storageService.js');
+    const count = await deleteAllDrafts();
+    addLog('info', `[ClearAll] Deleted all ${count} drafts from review board.`);
+    res.json({ success: true, count, message: `Successfully deleted all ${count} drafts.` });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 export default router;
+
 
 
