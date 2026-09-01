@@ -101,6 +101,17 @@ router.post('/reset-all', async (req, res) => {
     }
   }
 
+  try {
+    const { bulkResetApprovedToPending } = await import('../services/storageService.js');
+    const note = req.body?.note || 'Resubmitted for client review — please read each caption carefully.';
+    const count = await bulkResetApprovedToPending(note);
+    addLog('info', `[ResetAll] Reset ${count} posts back to PENDING_REVIEW.`);
+    res.json({ success: true, count, message: `Successfully reset ${count} posts back to PENDING_REVIEW.` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /**
  * Clears all drafts from the review board
  */
@@ -124,6 +135,3 @@ router.post('/clear-all', async (req, res) => {
 });
 
 export default router;
-
-
-
