@@ -113,9 +113,9 @@ router.post('/reset-all', async (req, res) => {
 });
 
 /**
- * Clears all drafts from the review board
+ * Sets strictly 3 curated non-UFO posts with clean captions (no prices, no cantons list)
  */
-router.post('/clear-all', async (req, res) => {
+router.post('/set-curated-batch', async (req, res) => {
   const secret = process.env.CRON_SECRET;
   if (secret) {
     const auth = req.headers.authorization;
@@ -125,13 +125,110 @@ router.post('/clear-all', async (req, res) => {
   }
 
   try {
-    const { deleteAllDrafts, addLog } = await import('../services/storageService.js');
-    const count = await deleteAllDrafts();
-    addLog('info', `[ClearAll] Deleted all ${count} drafts from review board.`);
-    res.json({ success: true, count, message: `Successfully deleted all ${count} drafts.` });
+    const { deleteAllDrafts, createDraft } = await import('../services/storageService.js');
+    await deleteAllDrafts();
+
+    // 1. Caffeine 200mg (nutrifitA12 image where the woman holds the caffeine bottle)
+    const post1 = await createDraft({
+      theme: 'workout',
+      slotTime: '07:00',
+      media: {
+        public_id: 'nutrifitA12',
+        filename: 'nutrifitA12.png',
+        secure_url: 'https://res.cloudinary.com/qtah71h2/image/upload/v1788286846/nutrifitness/nutrifitA12.png',
+        format: 'png',
+        resource_type: 'image',
+        aspect_ratio: '4:5 (Portrait Idéal)'
+      },
+      captions: {
+        instagramCaption: `🔥 Maximise chaque séance avec CAFFEINE 200MG 60 TABS !
+
+👉 Pourquoi CAFFEINE 200MG 60 TABS fait la différence :
+▫️ 200 mg de caféine pure par comprimé
+▫️ Améliore la concentration et la vigilance mentale
+▫️ Soutient la performance physique lors d’efforts intenses
+▫️ Effet énergisant rapide et durable
+
+💡 Conseil NutriFitness :
+Consomme 1 dose 20 à 30 minutes avant ta séance pour un boost d'énergie et une concentration maximale.
+
+🇨🇭 Disponible dès maintenant sur nutrifitness.ch (lien direct en bio).
+
+#fitnesssuisse #suisseromande #nutrifitness #genevefitness #lausannefit`,
+        pinterestTitle: 'CAFFEINE 200MG 60 TABS | NutriFitness Suisse 🇨🇭',
+        pinterestDescription: 'Améliore la force, l\'énergie et la concentration à l\'entraînement. Disponible sur nutrifitness.ch.'
+      }
+    });
+
+    // 2. Ghost Whey 918g
+    const post2 = await createDraft({
+      theme: 'nutrition',
+      slotTime: '17:00',
+      media: {
+        public_id: 'nutrifit_imastgram5',
+        filename: 'nutrifit_imastgram5.png',
+        secure_url: 'https://res.cloudinary.com/qtah71h2/image/upload/v1788286860/nutrifitness/nutrifit_imastgram5.png',
+        format: 'png',
+        resource_type: 'image',
+        aspect_ratio: '4:5 (Portrait Idéal)'
+      },
+      captions: {
+        instagramCaption: `⚡️ Optimise ta récupération avec GHOST WHEY 918G !
+
+👉 Pourquoi GHOST WHEY fait la différence :
+▫️ 25g de protéines pures de haute qualité par dose
+▫️ Saveur gourmande et onctueuse style dessert
+▫️ Faible en sucres et en matières grasses
+▫️ Digestion facile et assimilation rapide
+
+💡 Conseil NutriFitness :
+Consomme 1 shaker immédiatement après l'entraînement ou en collation pour nourrir tes fibres musculaires.
+
+🇨🇭 Disponible dès maintenant sur nutrifitness.ch (lien direct en bio).
+
+#fitnesssuisse #suisseromande #nutrifitness #genevefitness #lausannefit`,
+        pinterestTitle: 'GHOST WHEY 918G | NutriFitness Suisse 🇨🇭',
+        pinterestDescription: 'Protéine premium pour la récupération musculaire et le développement sec. Disponible sur nutrifitness.ch.'
+      }
+    });
+
+    // 3. ISO 90X CFM 1KG
+    const post3 = await createDraft({
+      theme: 'nutrition',
+      slotTime: '07:00',
+      media: {
+        public_id: 'nutrifit_imastgram1',
+        filename: 'nutrifit_imastgram1.png',
+        secure_url: 'https://res.cloudinary.com/qtah71h2/image/upload/v1788286859/nutrifitness/nutrifit_imastgram1.png',
+        format: 'png',
+        resource_type: 'image',
+        aspect_ratio: '4:5 (Portrait Idéal)'
+      },
+      captions: {
+        instagramCaption: `🥗 Atteins tes objectifs musculaires avec ISO 90X CFM 1KG !
+
+👉 Pourquoi ISO 90X CFM fait la différence :
+▫️ 84 % de protéines Grass-Fed microfiltrées à froid
+▫️ Enrichi en DIGEZYME® pour une digestion ultra-fluide
+▫️ Teneur minimale en glucides et en lipides
+▫️ Absorption express pour une régénération musculaire optimale
+
+💡 Conseil NutriFitness :
+Idéal au réveil ou après ta séance pour un apport immédiat en acides aminés essentiels.
+
+🇨🇭 Disponible dès maintenant sur nutrifitness.ch (lien direct en bio).
+
+#fitnesssuisse #suisseromande #nutrifitness #genevefitness #lausannefit`,
+        pinterestTitle: 'ISO 90X CFM 1KG | NutriFitness Suisse 🇨🇭',
+        pinterestDescription: 'Isolat de whey CFM ultra-pur pour la prise de muscle sec. Disponible sur nutrifitness.ch.'
+      }
+    });
+
+    res.json({ success: true, count: 3, posts: [post1.id, post2.id, post3.id] });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 export default router;
+
