@@ -125,6 +125,7 @@ function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink, onDr
   const [publisher, setPublisher] = useState(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const filtered = useMemo(() => filter === 'ALL' ? drafts : drafts.filter(draft => draft.status === filter), [drafts, filter]);
   useEffect(() => { if (!selectedId && filtered[0]) setSelectedId(filtered[0].id); }, [selectedId, filtered]);
   const selected = drafts.find(draft => draft.id === selectedId) || filtered[0];
@@ -142,6 +143,19 @@ function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink, onDr
     setComposer(null); await refresh('Updated post sent back for a new client review.');
   };
   const copyLink = async () => { await navigator.clipboard?.writeText(clientLink); refresh('Private client review link copied.'); };
+
+  const handleSyncCloudinary = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/drafts/sync-cloudinary', { method: 'POST' });
+      const data = await res.json();
+      await refresh(data.newCount > 0 ? `Synced ${data.newCount} new Cloudinary images with nutrifitness.ch captions!` : 'Cloudinary is already up to date.');
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const handleResetAll = async () => {
     setResetting(true);
@@ -161,7 +175,7 @@ function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink, onDr
     }
   };
 
-  return <main className="owner-page"><header className="owner-header"><div><p className="eyebrow">NUTRIFITNESS • CREATOR</p><h1>Posts</h1><p>Create, review and publish from one place.</p></div><div className="header-actions"><button className="button ghost" disabled={!clientLink} onClick={copyLink}><Copy size={16} /> Copy review link</button><a className="button ghost" target="_blank" rel="noreferrer" href={clientLink || '#'}><Link size={16} /> Open client view</a>{resetableCount > 0 && <button className="button ghost" onClick={() => setShowResetConfirm(true)} title={`Reset ${resetableCount} post(s) for client re-review`}><RotateCcw size={16} /> Re-send for approval ({resetableCount})</button>}<button className="button dark" onClick={() => setComposer({})}><Plus size={17} /> New post</button></div></header>
+  return <main className="owner-page"><header className="owner-header"><div><p className="eyebrow">NUTRIFITNESS • CREATOR</p><h1>Posts</h1><p>Create, review and publish from one place.</p></div><div className="header-actions"><button className="button ghost" disabled={!clientLink} onClick={copyLink}><Copy size={16} /> Copy review link</button><a className="button ghost" target="_blank" rel="noreferrer" href={clientLink || '#'}><Link size={16} /> Open client view</a><button className="button ghost" disabled={syncing} onClick={handleSyncCloudinary} title="Import new images from Cloudinary"><RefreshCw size={15} className={syncing ? 'spin' : ''} /> {syncing ? 'Syncing…' : 'Sync Cloudinary'}</button>{resetableCount > 0 && <button className="button ghost" onClick={() => setShowResetConfirm(true)} title={`Reset ${resetableCount} post(s) for client re-review`}><RotateCcw size={16} /> Re-send for approval ({resetableCount})</button>}<button className="button dark" onClick={() => setComposer({})}><Plus size={17} /> New post</button></div></header>
     {notice && <div className="notice success"><CheckCircle2 size={17} />{notice}</div>}
     <section className="stats"><div><Clock3 /><strong>{drafts.filter(d => d.status === 'PENDING_REVIEW').length}</strong><span>Waiting for client</span></div><div><Package /><strong>{drafts.filter(d => d.status === 'PRODUCT_CHANGE_REQUESTED').length}</strong><span>Needs rework</span></div><div><CheckCircle2 /><strong>{drafts.filter(d => d.status === 'APPROVED').length}</strong><span>Approved</span></div><div><XCircle /><strong>{drafts.filter(d => d.status === 'REJECTED').length}</strong><span>Rejected</span></div></section>
     <section className="board"><aside className="post-list"><div className="filter-row">{['ALL', ...Object.keys(STATUS)].map(item => <button className={filter === item ? 'active' : ''} onClick={() => { setFilter(item); setSelectedId(''); }} key={item}>{item === 'ALL' ? 'All' : STATUS[item].label}</button>)}</div>

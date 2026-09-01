@@ -34,8 +34,56 @@ router.post('/trigger', async (req, res) => {
   addLog('info', `[Cron] Triggered via Vercel Cron — ${slotLabel}`);
 
   try {
+    // Auto-sync any new Cloudinary uploads before publishing
+    try {
+      const { syncCloudinaryToDrafts } = await import('../services/reviewBatchService.js');
+      await syncCloudinaryToDrafts();
+    } catch (e) {}
+
     const result = await publishNextApprovedDraft(slotLabel);
     res.json({ success: result.success, slotLabel, result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Cloudinary auto-sync endpoint (can be called by cron, webhook, or curl)
+ */
+router.post('/sync-cloudinary', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (secret) {
+    const auth = req.headers.authorization;
+    if (auth !== `Bearer ${secret}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
+
+  try {
+    const { syncCloudinaryToDrafts } = await import('../services/reviewBatchService.js');
+    const result = await syncCloudinaryToDrafts();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Rewrites all non-posted draft captions using real product data from nutrifitness.ch
+ */
+router.post('/rewrite-captions', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (secret) {
+    const auth = req.headers.authorization;
+    if (auth !== `Bearer ${secret}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
+
+  try {
+    const { rewriteAllCaptions } = await import('../services/reviewBatchService.js');
+    const result = await rewriteAllCaptions();
+    res.json({ success: true, ...result });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -65,4 +113,5 @@ router.post('/reset-all', async (req, res) => {
 });
 
 export default router;
+
 

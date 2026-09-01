@@ -121,73 +121,49 @@ export function generateHashtags(theme = 'motivation') {
 
 /**
  * Generate viral French captions for Instagram & Pinterest (Strict 5-Hashtags & 0-Links Rule)
+ * Directly integrates the real product catalog from nutrifitness.ch
  */
 export async function generateViralPostContent({
   theme = 'motivation',
   customPrompt = '',
   mediaTitle = '',
+  media = null,
+  index = 0,
   targetAudience = 'Suisse (Romandie)'
 }) {
-  const settings = getSettings();
-  const openaiKey = settings.openai?.apiKey;
-  const hashtags = generateHashtags(theme);
+  const { matchProductForMedia, generateCaptionFromProduct } = await import('./productCatalogService.js');
 
-  if (openaiKey) {
-    try {
-      const response = await axios.post(
-        'https://api.openai.com/v1/chat/completions',
-        {
-          model: 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content: `Tu es le meilleur copywriter francophone pour NutriFitness Suisse (nutrifitness.ch), marque de fitness & nutrition premium basée en Suisse romande.
-DIRECTIVES STRICTES INSTAGRAM (CONFORMITÉ 100%) :
-1. AUCUN LIEN NI URL BRUTE dans la légende ou les commentaires (Instagram ne permet pas les liens cliquables). Utilise uniquement "Lien dans la bio".
-2. EXACTEMENT 5 HASHTAGS MAXIMUM à la fin du post (#fitnesssuisse #suisseromande #genevefitness #lausannefit #nutrifitness). Pas plus de 5 hashtags.
-3. Langue : Français impeccable, énergique, bienveillant, professionnel et motivant.
-4. Structure : Hook percutant, corps avec puces/emojis, CTA clair, 5 hashtags.`
-            },
-            {
-              role: 'user',
-              content: `Génère un post viral pour le créneau : ${theme}.
-Titre média : ${mediaTitle || 'Modèle Athlétique NutriFitness.ch'}
-Consignes supplémentaires : ${customPrompt || 'Conseils pratiques, esthétique gym et motivation quotidienne'}`
-            }
-          ],
-          response_format: { type: 'json_object' }
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${openaiKey}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 15000
-        }
-      );
+  const mediaObj = media || { filename: mediaTitle, title: mediaTitle };
+  const product = await matchProductForMedia(mediaObj, index);
 
-      const parsed = JSON.parse(response.data.choices[0].message.content);
-      const igCheck = sanitizeInstagramCaption(parsed.instagramCaption || parsed.caption || '');
+  if (product) {
+    const productCaption = generateCaptionFromProduct(product);
+    const igCheck = sanitizeInstagramCaption(productCaption.instagramCaption);
 
-      return {
-        theme,
-        instagramCaption: igCheck.sanitizedText,
-        pinterestTitle: parsed.pinterestTitle || `NutriFitness Suisse 🇨🇭 | ${theme.toUpperCase()}`,
-        pinterestDescription: parsed.pinterestDescription || parsed.instagramCaption,
-        hashtags,
-        isAIGenerated: true,
-        guidelineChecks: {
-          noLinksInCaption: true,
-          exact5Hashtags: true,
-          frenchLanguage: true
-        }
-      };
-    } catch (error) {
-      addLog('warn', `OpenAI API indisponible (${error.message}), utilisation du générateur certifié conforme.`);
-    }
+    return {
+      theme: productCaption.theme || theme,
+      product: {
+        name: product.name,
+        price: product.price,
+        slug: product.slug,
+        permalink: product.permalink
+      },
+      instagramCaption: igCheck.sanitizedText,
+      pinterestTitle: productCaption.pinterestTitle,
+      pinterestDescription: productCaption.pinterestDescription,
+      hashtags: generateHashtags(productCaption.theme || theme),
+      isAIGenerated: true,
+      guidelineChecks: {
+        noLinksInCaption: true,
+        exact5Hashtags: true,
+        frenchLanguage: true,
+        matchedProduct: product.name
+      }
+    };
   }
 
-  // Built-in Swiss French Certified Generator (Strictly 5 hashtags & 0 links)
+  // Fallback: Built-in Swiss French Certified Generator
+  const hashtags = generateHashtags(theme);
   const pool = VIRAL_TEMPLATES[theme] || VIRAL_TEMPLATES.motivation;
   const selectedTemplate = pool[Math.floor(Math.random() * pool.length)];
 
@@ -195,7 +171,7 @@ Consignes supplémentaires : ${customPrompt || 'Conseils pratiques, esthétique 
   const igCheck = sanitizeInstagramCaption(fullInstagramCaption);
 
   const pinterestTitle = `NutriFitness.ch 🇨🇭 - ${selectedTemplate.hook.replace(/^[^\w\s]+/, '').trim().substring(0, 70)}`;
-  const pinterestDescription = `${selectedTemplate.hook}\n\n${selectedTemplate.body}\n\nRetrouvez tous nos programmes sur nutrifitness.ch.\n\n${hashtags}`;
+  const pinterestDescription = `${selectedTemplate.hook}\n\n${selectedTemplate.body}\n\nRetrouvez tous nos compléments et conseils sur nutrifitness.ch.\n\n${hashtags}`;
 
   return {
     theme,
@@ -211,3 +187,4 @@ Consignes supplémentaires : ${customPrompt || 'Conseils pratiques, esthétique 
     }
   };
 }
+

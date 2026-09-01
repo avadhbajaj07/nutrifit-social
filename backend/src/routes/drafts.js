@@ -3,7 +3,7 @@ import { getDrafts, getDraftById, createDraft, updateDraft, deleteDraft, addLog,
 import { listMediaFromFolder } from '../services/cloudinaryService.js';
 import { generateViralPostContent } from '../services/aiCaptionService.js';
 import { createBlotatoPost, getBlotatoPostStatus, publishToPlatforms, uploadBlotatoMedia } from '../services/blotatoService.js';
-import { ensureClientReviewBatch } from '../services/reviewBatchService.js';
+import { ensureClientReviewBatch, syncCloudinaryToDrafts, rewriteAllCaptions } from '../services/reviewBatchService.js';
 import { requireAdmin } from '../services/adminAuthService.js';
 import { assignScheduledSlot } from '../services/schedulerService.js';
 
@@ -28,7 +28,33 @@ const addRevision = (draft, event, note = '', overrides = {}) => ({
 });
 
 router.get('/', requireAdmin, async (req, res) => {
-  try { res.json({ drafts: await getDrafts() }); } catch (error) { res.status(500).json({ error: error.message }); }
+  try {
+    // Automatically ingest any new Cloudinary assets when viewing drafts
+    try { await syncCloudinaryToDrafts(); } catch (e) {}
+    res.json({ drafts: await getDrafts() });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Sync newly uploaded Cloudinary images into pending drafts with product captions
+router.post('/sync-cloudinary', requireAdmin, async (req, res) => {
+  try {
+    const result = await syncCloudinaryToDrafts();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Rewrite captions for all drafts using real product data from nutrifitness.ch
+router.post('/rewrite-all-captions', requireAdmin, async (req, res) => {
+  try {
+    const result = await rewriteAllCaptions();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // This is the only dataset exposed on the shareable client page.
@@ -42,14 +68,15 @@ router.get('/client-link', requireAdmin, (req, res) => {
 // Reset all APPROVED drafts back to PENDING_REVIEW for a new client review round.
 router.post('/reset-all-to-pending', requireAdmin, async (req, res) => {
   try {
-    const note = req.body.note || 'Resubmitted for re-review — please read the caption carefully before approving.';
+    const note = req.body.note || 'Resubmitted for client review — please read each caption carefully.';
     const count = await bulkResetApprovedToPending(note);
-    addLog('info', `${count} approved post(s) reset to PENDING_REVIEW for client re-review.`);
+    addLog('info', `${count} post(s) reset to PENDING_REVIEW for client re-review.`);
     res.json({ success: true, count, message: `${count} post(s) sent back for client approval.` });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 router.get('/client', requireClientPortalAccess, (req, res) => {
   ensureClientReviewBatch().then(drafts => {
