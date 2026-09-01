@@ -9,14 +9,68 @@ const CATALOG_PATH = path.join(__dirname, '../../data/nutrifitness_catalog.json'
 
 let cachedProducts = null;
 
+const CUSTOM_PATHS = [
+  path.join(__dirname, '../../../products.json'),
+  path.join(__dirname, '../../data/products.json'),
+  path.join(__dirname, '../../../products.txt'),
+  path.join(__dirname, '../../data/products.txt')
+];
+
 /**
- * Loads products from local JSON cache, or fetches from WooCommerce Store API if empty
+ * Loads products from user custom file (highest priority), local JSON cache, or WooCommerce API
  */
 export async function getProductCatalog() {
   if (cachedProducts && cachedProducts.length > 0) {
     return cachedProducts;
   }
 
+  // 1. Highest priority: User-provided custom products file
+  for (const customPath of CUSTOM_PATHS) {
+    if (fs.existsSync(customPath)) {
+      try {
+        const raw = fs.readFileSync(customPath, 'utf8').trim();
+        if (customPath.endsWith('.json')) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            cachedProducts = parsed.map(p => ({
+              id: p.id || p.name,
+              name: p.name,
+              slug: p.slug || p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+              short_description: p.short_description || p.shortDescription || p.description || '',
+              description: p.description || p.longDescription || '',
+              categories: p.categories || []
+            }));
+            addLog('info', `Loaded ${cachedProducts.length} custom products from ${path.basename(customPath)}`);
+            return cachedProducts;
+          }
+        } else {
+          // Text format: parse blocks separated by --- or double newlines
+          const blocks = raw.split(/\n---\n|\n\n(?=[A-Z0-9])/);
+          cachedProducts = blocks.map((b, i) => {
+            const lines = b.trim().split('\n').map(l => l.trim()).filter(Boolean);
+            const name = lines[0] || `Product ${i+1}`;
+            const desc = lines.slice(1).join('\n');
+            return {
+              id: name,
+              name,
+              slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+              short_description: desc,
+              description: desc,
+              categories: []
+            };
+          });
+          if (cachedProducts.length > 0) {
+            addLog('info', `Loaded ${cachedProducts.length} custom products from ${path.basename(customPath)}`);
+            return cachedProducts;
+          }
+        }
+      } catch (e) {
+        console.warn('Error reading custom products file:', e.message);
+      }
+    }
+  }
+
+  // 2. Local WooCommerce catalog cache
   try {
     if (fs.existsSync(CATALOG_PATH)) {
       const data = fs.readFileSync(CATALOG_PATH, 'utf8');
@@ -26,6 +80,7 @@ export async function getProductCatalog() {
   } catch (err) {
     console.warn('Could not read cached catalog, will fetch live:', err.message);
   }
+
 
   // Fallback: Fetch live from nutrifitness.ch
   try {
@@ -167,11 +222,11 @@ export function generateCaptionFromProduct(product, options = {}) {
   }
 
   // Hook tailored to product
-  let hook = `⚡️ ${name} — Le choix de l'élite pour tes objectifs en Suisse romande !`;
+  let hook = `⚡️ Boost tes performances avec ${name} !`;
   if (theme === 'workout') {
-    hook = `🔥 Maximise chaque répétition avec ${name} !`;
+    hook = `🔥 Maximise chaque séance avec ${name} !`;
   } else if (theme === 'nutrition') {
-    hook = `🥗 Atteins tes quotas de nutrition sans compromis : découvre ${name}.`;
+    hook = `🥗 Optimise ta nutrition avec ${name} !`;
   }
 
   // Build benefits list
@@ -179,27 +234,25 @@ export function generateCaptionFromProduct(product, options = {}) {
   if (benefits.length > 0) {
     benefitsText = benefits.map(b => `▫️ ${b}`).join('\n');
   } else {
-    benefitsText = `▫️ Formule de qualité pharmaceutique testée et approuvée\n▫️ Pureté maximale & haute biodisponibilité\n▫️ Idéal pour sportifs et personnes actives en Suisse\n▫️ Résultats visibles et digestibilité optimale`;
+    benefitsText = `▫️ Formule premium testée et approuvée\n▫️ Haute qualité et pureté maximale\n▫️ Idéal pour sportifs et personnes actives\n▫️ Efficacité et digestibilité optimale`;
   }
 
   // Usage guidance based on product
-  let advice = "Prends 1 dose selon tes besoins d'entraînement pour des performances optimales.";
-  if (nameLower.includes('caffeine') || nameLower.includes('pre-workout') || nameLower.includes('ghost')) {
-    advice = "Consomme 1 dose 20 à 30 minutes avant ta séance pour un focus tranchant et zéro coup de fatigue.";
+  let advice = "Prends 1 dose selon tes besoins pour des résultats optimaux.";
+  if (nameLower.includes('caffeine') || nameLower.includes('pre-workout') || nameLower.includes('ghost') || nameLower.includes('blast')) {
+    advice = "Consomme 1 dose 20 à 30 minutes avant ta séance pour un boost d'énergie et une concentration maximale.";
   } else if (nameLower.includes('whey') || nameLower.includes('iso') || nameLower.includes('protein')) {
-    advice = "Consomme 1 shaker immédiatement après l'entraînement ou au petit-déjeuner pour nourrir tes fibres musculaires.";
+    advice = "Consomme 1 shaker immédiatement après l'entraînement ou en collation pour soutenir ta masse musculaire.";
   } else if (nameLower.includes('creatine') || nameLower.includes('creapure')) {
-    advice = "Prends 3 à 5g par jour de façon régulière avec de l'eau ou ton shaker pour saturer tes stocks d'ATP.";
+    advice = "Prends 3 à 5g par jour avec de l'eau ou ton shaker pour maximiser ta force et ta récupération.";
   } else if (nameLower.includes('glycine') || nameLower.includes('magnesium') || nameLower.includes('sommeil')) {
-    advice = "Prends ta dose environ 30 minutes avant le coucher pour optimiser ton sommeil profond et ta régénération nerveuse.";
+    advice = "Prends ta dose environ 30 minutes avant le coucher pour un sommeil profond et réparateur.";
   } else if (nameLower.includes('fat burn') || nameLower.includes('burn')) {
-    advice = "Prends ta dose le matin ou avant une séance cardio pour accélérer ta dépense calorique.";
+    advice = "Prends ta dose le matin ou avant ta séance pour stimuler ton métabolisme.";
   }
 
-  // Construct final Instagram caption
+  // Construct final Instagram caption (No prices, clean Swiss link CTA, exactly 5 hashtags)
   const instagramCaption = `${hook}
-
-Tu cherches à optimiser tes performances, ta silhouette ou ta récupération ? Ne laisse rien au hasard.
 
 👉 Pourquoi ${name} fait la différence :
 ${benefitsText}
@@ -207,13 +260,12 @@ ${benefitsText}
 💡 Conseil NutriFitness :
 ${advice}
 
-🇨🇭 Retrouve ${name} ${price} directement sur notre boutique officielle nutrifitness.ch !
-Lien disponible dans la bio. Livraison express partout en Suisse romande (Genève, Lausanne, Valais, Fribourg, Neuchâtel).
+🇨🇭 Disponible dès maintenant sur nutrifitness.ch (lien direct en bio).
 
 #fitnesssuisse #suisseromande #nutrifitness #genevefitness #lausannefit`;
 
   const pinterestTitle = `${name} | NutriFitness Suisse 🇨🇭`;
-  const pinterestDescription = `${name} disponible sur nutrifitness.ch. ${shortDesc.slice(0, 200)} Livraison rapide en Suisse romande. Conseils sport & nutrition.`;
+  const pinterestDescription = `${name} disponible sur nutrifitness.ch. ${shortDesc.slice(0, 200)} Conseils sport & nutrition.`;
 
   return {
     theme,
@@ -223,3 +275,4 @@ Lien disponible dans la bio. Livraison express partout en Suisse romande (Genèv
     pinterestDescription
   };
 }
+

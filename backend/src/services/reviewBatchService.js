@@ -122,13 +122,9 @@ export async function rewriteAllCaptions() {
  * and returns all reviewable posts.
  */
 export async function ensureClientReviewBatch() {
-  // Sync any newly added Cloudinary images first
-  try {
-    await syncCloudinaryToDrafts();
-  } catch (err) {
-    console.warn('Auto-sync check failed during batch review:', err.message);
-  }
-
   const drafts = await getDrafts();
-  return drafts.filter(draft => draft.status === 'PENDING_REVIEW');
+  return drafts
+    .filter(draft => draft.status === 'PENDING_REVIEW')
+    .slice(0, 3);
 }
+
