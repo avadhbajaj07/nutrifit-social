@@ -29,13 +29,12 @@ const addRevision = (draft, event, note = '', overrides = {}) => ({
 
 router.get('/', requireAdmin, async (req, res) => {
   try {
-    // Automatically ingest any new Cloudinary assets when viewing drafts
-    try { await syncCloudinaryToDrafts(); } catch (e) {}
     res.json({ drafts: await getDrafts() });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 // Sync newly uploaded Cloudinary images into pending drafts with product captions
 router.post('/sync-cloudinary', requireAdmin, async (req, res) => {
@@ -161,16 +160,10 @@ router.post('/:id/client-response', requireClientPortalAccess, (req, res) => {
     const draft = await updateDraft(current.id, updates);
     addLog('info', `Client review for ${current.id}: ${action}.`);
 
-    // Auto-assign next free 07:00/17:00 CET slot when a post is approved
-    if ((action === 'approve' || action === 'caption_approve') && !scheduledFor) {
-      assignScheduledSlot(current.id).catch(err =>
-        addLog('warn', `Could not auto-assign slot for ${current.id}: ${err.message}`)
-      );
-    }
-
     res.json({ success: true, draft });
   }).catch(error => res.status(500).json({ error: error.message }));
 });
+
 
 
 router.post('/:id/publish-now', requireAdmin, async (req, res) => {

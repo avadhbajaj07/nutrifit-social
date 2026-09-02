@@ -24,15 +24,6 @@
         "service": "frontend"
       }
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/cron/trigger",
-      "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron/trigger",
-      "schedule": "0 16 * * *"
-    }
   ]
 }
+
