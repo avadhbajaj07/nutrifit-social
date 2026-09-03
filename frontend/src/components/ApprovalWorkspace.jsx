@@ -59,6 +59,17 @@ function History({ draft }) {
   </div>;
 }
 
+function getProductTitle(post) {
+
+  if (!post) return 'Social Post';
+  const raw = post.media?.filename || post.media?.title || '';
+  return raw
+    .replace(/\s*-\s*\d+\.(png|jpe?g|webp)$/i, '')
+    .replace(/\.[^/.]+$/, '')
+    .replace(/_/g, ' ')
+    .trim() || 'NutriFitness Post';
+}
+
 function ClientActions({ draft, onRespond, working }) {
   const [panel, setPanel] = useState(null);
   const [product, setProduct] = useState('');
@@ -68,40 +79,196 @@ function ClientActions({ draft, onRespond, working }) {
   useEffect(() => { setCaption(draft.captions?.instagramCaption || ''); setPanel(null); }, [draft.id, draft.captions?.instagramCaption]);
   const send = (action, payload = {}) => onRespond(draft.id, { action, ...payload });
 
-  if (draft.status !== 'PENDING_REVIEW') return <div className="client-result"><Pill status={draft.status} />{draft.productRequest && <p>{draft.productRequest}</p>}</div>;
-  return <section className="review-actions">
-    <p className="small-label">Choose one response</p>
-    <button className="action primary" disabled={working} onClick={() => send('approve')}><CheckCircle2 size={17} /> Approve</button>
-    <button className="action" onClick={() => setPanel(panel === 'product' ? null : 'product')}><Package size={17} /> Keep design, change product</button>
-    {panel === 'product' && <div className="inline-form"><input autoFocus value={product} onChange={e => setProduct(e.target.value)} placeholder="Which product should be shown?" /><button disabled={working || !product.trim()} onClick={() => send('product_change', { productRequest: product })}>Send request</button></div>}
-    <button className="action" onClick={() => setPanel(panel === 'caption' ? null : 'caption')}><Pencil size={17} /> Edit caption & approve</button>
-    {panel === 'caption' && <div className="inline-form stacked"><textarea value={caption} onChange={e => setCaption(e.target.value)} rows="7" /><button disabled={working || !caption.trim()} onClick={() => send('caption_approve', { caption })}><Check size={16} /> Save caption & approve</button></div>}
-    <button className="action reject" onClick={() => setPanel(panel === 'reject' ? null : 'reject')}><XCircle size={17} /> Reject design</button>
-    {panel === 'reject' && <div className="inline-form"><input autoFocus value={note} onChange={e => setNote(e.target.value)} placeholder="Optional reason (helps the creator)" /><button className="danger" disabled={working} onClick={() => send('reject', { note })}>Reject design</button></div>}
-  </section>;
+  if (draft.status !== 'PENDING_REVIEW') {
+    return (
+      <div className="client-result">
+        <Pill status={draft.status} />
+        {draft.productRequest && <p style={{ marginTop: 6, fontWeight: 500 }}>Demande : {draft.productRequest}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <section className="review-actions">
+      <p className="small-label">CHOISIR UNE DÉCISION POUR CETTE PUBLICATION</p>
+      <div className="actions-grid">
+        <button className="action primary-approve" disabled={working} onClick={() => send('approve')}>
+          <CheckCircle2 size={18} />
+          <span>Approuver pour publication (Blotato)</span>
+        </button>
+        <button className="action secondary" onClick={() => setPanel(panel === 'product' ? null : 'product')}>
+          <Package size={17} />
+          <span>Garder le visuel, changer de produit</span>
+        </button>
+        {panel === 'product' && (
+          <div className="inline-form">
+            <input autoFocus value={product} onChange={e => setProduct(e.target.value)} placeholder="Quel produit souhaitez-vous associer ?" />
+            <button disabled={working || !product.trim()} onClick={() => send('product_change', { productRequest: product })}>Envoyer la demande</button>
+          </div>
+        )}
+        <button className="action secondary" onClick={() => setPanel(panel === 'caption' ? null : 'caption')}>
+          <Pencil size={17} />
+          <span>Modifier le texte & approuver</span>
+        </button>
+        {panel === 'caption' && (
+          <div className="inline-form stacked">
+            <textarea value={caption} onChange={e => setCaption(e.target.value)} rows="8" />
+            <button disabled={working || !caption.trim()} onClick={() => send('caption_approve', { caption })}>
+              <Check size={16} /> Enregistrer et approuver
+            </button>
+          </div>
+        )}
+        <button className="action reject-outline" onClick={() => setPanel(panel === 'reject' ? null : 'reject')}>
+          <XCircle size={17} />
+          <span>Rejeter ce visuel</span>
+        </button>
+        {panel === 'reject' && (
+          <div className="inline-form">
+            <input autoFocus value={note} onChange={e => setNote(e.target.value)} placeholder="Raison optionnelle pour l'équipe..." />
+            <button className="danger" disabled={working} onClick={() => send('reject', { note })}>Confirmer le rejet</button>
+          </div>
+        )}
+      </div>
+    </section>
+  );
 }
 
 function ClientPortal({ drafts, onRespond, loading, notice }) {
   const reviewable = drafts.filter(item => item.status === 'PENDING_REVIEW');
   const [currentId, setCurrentId] = useState('');
-  useEffect(() => { if (!currentId && reviewable[0]) setCurrentId(reviewable[0].id); }, [currentId, reviewable]);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!currentId && reviewable[0]) setCurrentId(reviewable[0].id);
+  }, [currentId, reviewable]);
+
   const current = drafts.find(item => item.id === currentId) || reviewable[0];
-  return <main className="client-page">
-    <header className="client-header"><div className="brand-mark">N</div><div><p className="eyebrow">NUTRIFITNESS</p><h1>Review posts</h1></div><span className="round-chip">{reviewable.length} waiting</span></header>
-    {notice && <div className="notice success"><CheckCircle2 size={17} />{notice}</div>}
-    {loading ? <div className="empty-card">Loading your posts…</div> : current ? <>
-      <div className="client-switcher">{drafts.map((post, index) => <button key={post.id} onClick={() => setCurrentId(post.id)} className={current.id === post.id ? 'active' : ''}>Post {index + 1} <Pill status={post.status} /></button>)}</div>
-      <article className="client-card">
-        <div className="image-frame"><img src={current.media?.secure_url} alt="Post awaiting review" /></div>
-        <div className="client-copy"><div className="card-heading"><div><p className="eyebrow">REVISION {current.revision || 1}</p><h2>Caption</h2></div><Pill status={current.status} /></div>
-          <p className="caption-copy">{current.captions?.instagramCaption}</p>
-          <ClientActions draft={current} onRespond={onRespond} working={loading} />
-          <History draft={current} />
+  const productTitle = getProductTitle(current);
+
+  const handleCopy = () => {
+    if (current?.captions?.instagramCaption) {
+      navigator.clipboard.writeText(current.captions.instagramCaption);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <main className="client-page">
+      <header className="client-header">
+        <div className="brand-mark">NF</div>
+        <div>
+          <p className="eyebrow">🇨🇭 NUTRIFITNESS SUISSE</p>
+          <h1>Validation des publications</h1>
         </div>
-      </article>
-    </> : <div className="empty-card"><CheckCircle2 size={34} /><h2>All caught up</h2><p>There are no posts waiting for your review.</p></div>}
-    <SiteFooter />
-  </main>;
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="round-chip">{reviewable.length} en attente</span>
+        </div>
+      </header>
+
+      {notice && <div className="notice success"><CheckCircle2 size={17} />{notice}</div>}
+
+      {loading ? (
+        <div className="empty-card">Chargement de vos publications…</div>
+      ) : current ? (
+        <>
+          <div className="client-switcher">
+            {drafts.map((post, index) => {
+              const title = getProductTitle(post);
+              return (
+                <button
+                  key={post.id}
+                  onClick={() => setCurrentId(post.id)}
+                  className={`client-tab-btn ${current.id === post.id ? 'active' : ''}`}
+                >
+                  <img src={post.media?.secure_url} alt="" className="tab-thumb" />
+                  <div className="tab-info">
+                    <span className="tab-num">Post {index + 1}</span>
+                    <strong className="tab-name">{title}</strong>
+                  </div>
+                  <Pill status={post.status} />
+                </button>
+              );
+            })}
+          </div>
+
+          <article className="client-card">
+            {/* Left: Instagram Feed Mockup */}
+            <div className="instagram-preview-column">
+              <div className="instagram-phone-frame">
+                {/* IG Post Header */}
+                <div className="ig-header">
+                  <div className="ig-avatar">NF</div>
+                  <div className="ig-user-info">
+                    <strong>nutrifitness.ch</strong>
+                    <small>Genève, Suisse 🇨🇭</small>
+                  </div>
+                  <div className="ig-more">•••</div>
+                </div>
+
+                {/* IG Image */}
+                <div className="ig-image-wrapper">
+                  <img src={current.media?.secure_url} alt={productTitle} />
+                </div>
+
+                {/* IG Actions bar */}
+                <div className="ig-actions">
+                  <div className="ig-actions-left">
+                    <span className="ig-icon" title="Like">❤️</span>
+                    <span className="ig-icon" title="Comment">💬</span>
+                    <span className="ig-icon" title="Share">↗️</span>
+                  </div>
+                  <span className="ig-icon" title="Save">🔖</span>
+                </div>
+
+                <div className="ig-likes">Aimé par <strong>nutrifitness.ch</strong> et <strong>d’autres personnes</strong></div>
+              </div>
+            </div>
+
+            {/* Right: Product & Caption Details */}
+            <div className="client-copy">
+              <div className="card-heading">
+                <div>
+                  <p className="eyebrow">PRODUIT OFFICIEL · RÉVISION {current.revision || 1}</p>
+                  <h2>{productTitle}</h2>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Pill status={current.status} />
+                  {current.scheduledFor && (
+                    <span style={{ fontSize: 11, background: '#e0f2fe', color: '#0369a1', padding: '3px 8px', borderRadius: 6, fontWeight: 600 }}>
+                      📅 {prettyDate(current.scheduledFor).split(' (Geneva)')[0]}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Caption Section */}
+              <div className="caption-box-wrapper">
+                <div className="caption-box-header">
+                  <span className="caption-tag">LÉGENDE INSTAGRAM OFFICIELLE</span>
+                  <button className="copy-btn" onClick={handleCopy} title="Copier la légende">
+                    {copied ? <Check size={14} color="#16a34a" /> : <Copy size={14} />}
+                    <span>{copied ? 'Copié !' : 'Copier'}</span>
+                  </button>
+                </div>
+                <div className="caption-copy">{current.captions?.instagramCaption}</div>
+              </div>
+
+              <ClientActions draft={current} onRespond={onRespond} working={loading} />
+              <History draft={current} />
+            </div>
+          </article>
+        </>
+      ) : (
+        <div className="empty-card">
+          <CheckCircle2 size={34} />
+          <h2>Tout est à jour !</h2>
+          <p>Toutes les publications ont été validées ou traitées.</p>
+        </div>
+      )}
+      <SiteFooter />
+    </main>
+  );
 }
 
 function Composer({ media, initial, onSave, onClose, working }) {
