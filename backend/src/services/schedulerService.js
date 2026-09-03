@@ -4,8 +4,8 @@ import { publishToPlatforms } from './blotatoService.js';
 let activeCronJobs = [];
 let isExecuting = false;
 
-// ─── The two daily CET slots ────────────────────────────────────────────────
-const SLOT_TIMES = ['07:00', '17:00']; // Europe/Zurich
+// ─── The three daily Swiss CET slots (9:00 AM, 2:00 PM, 7:00 PM) ───────────
+const SLOT_TIMES = ['09:00', '14:00', '19:00']; // Europe/Zurich
 
 // ─── Convert HH:MM in Europe/Zurich to a UTC Date on a given calendar date ──
 function cetSlotToUTC(isoDateStr, timeStr) {
@@ -282,10 +282,11 @@ export async function executePostWorkflow(slotTheme = 'motivation', options = {}
   return publishNextApprovedDraft(slotTheme);
 }
 
-// ─── Scheduler: 07:00 and 17:00 Europe/Zurich daily ─────────────────────────
+// ─── Scheduler: 09:00, 14:00, 19:00 Europe/Zurich daily ──────────────────────
 const DAILY_SLOTS = [
-  { time: '07:00', label: 'Morning (07:00 CET)' },
-  { time: '17:00', label: 'Evening (17:00 CET)' }
+  { time: '09:00', label: 'Matin (09:00 CET / Swiss Time)', theme: 'motivation' },
+  { time: '14:00', label: 'Après-midi (14:00 CET / Swiss Time)', theme: 'nutrition' },
+  { time: '19:00', label: 'Soir (19:00 CET / Swiss Time)', theme: 'workout' }
 ];
 
 function scheduleSlot(slot) {
@@ -305,7 +306,7 @@ function scheduleSlot(slot) {
 export function initScheduler() {
   activeCronJobs.forEach(t => clearTimeout(t));
   activeCronJobs = [];
-  addLog('info', '[Scheduler] Auto-publish initialized: 07:00 + 17:00 CET (approved posts only).');
+  addLog('info', '[Scheduler] Auto-publish initialized: 09:00, 14:00, 19:00 CET (Swiss Time, approved posts only).');
   for (const slot of DAILY_SLOTS) {
     activeCronJobs.push(scheduleSlot(slot));
   }
@@ -318,22 +319,22 @@ export async function getScheduleStatusAsync() {
 
   // Build upcoming slots with their assigned drafts
   const allDrafts = await getDrafts();
-  const scheduledDrafts = allDrafts
-    .filter(d => ['APPROVED', 'SCHEDULED'].includes(d.status) && d.scheduledFor)
-    .sort((a, b) => new Date(a.scheduledFor) - new Date(b.scheduledFor));
+  const scheduledDrafts = allDrafts.filter(d => ['APPROVED', 'SCHEDULED'].includes(d.status) && d.scheduledFor);
 
-  // Build slot rows for next 7 days
   const rows = [];
   let date = todayInZurich();
-  for (let day = 0; day < 7; day++) {
+  for (let day = 0; day < 14; day++) {
     for (const time of SLOT_TIMES) {
       const slotUTC = cetSlotToUTC(date, time);
-      if (slotUTC.getTime() < now.getTime() - 60 * 1000) continue; // skip past slots
+      const countdownMinutes = Math.round((slotUTC.getTime() - now.getTime()) / 60000);
+      if (countdownMinutes < -120) continue; // skip slots more than 2h in the past
+
+      // Find draft assigned to this slot
       const assigned = scheduledDrafts.find(d => {
-        const diff = Math.abs(new Date(d.scheduledFor) - slotUTC);
-        return diff < 60 * 1000; // within 1 min
+        const dUTC = new Date(d.scheduledFor);
+        return Math.abs(dUTC.getTime() - slotUTC.getTime()) < 5 * 60 * 1000;
       });
-      const countdownMinutes = Math.round((slotUTC - now) / 60000);
+
       rows.push({
         id: `${date}-${time}`,
         date,
@@ -373,7 +374,7 @@ export function getScheduleStatus() {
       id: slot.time,
       time: slot.time,
       label: slot.label,
-      theme: slot.time === '07:00' ? 'motivation' : 'workout',
+      theme: slot.theme,
       nextRun: nextRun.toISOString(),
       countdownMinutes: Math.round((nextRun - now) / 60000),
       isNext: false
@@ -381,4 +382,41 @@ export function getScheduleStatus() {
   }).sort((a, b) => new Date(a.nextRun) - new Date(b.nextRun));
   if (slots.length > 0) slots[0].isNext = true;
   return { enabled: true, timezone: 'Europe/Zurich', slots, isExecuting, folder: settings.cloudinary?.folder };
+}
+
+/**
+ * Reschedule a draft to a specific Swiss time (ISO string)
+ */
+export async function rescheduleDraft(draftId, targetTimeIso) {
+  const { getDraftById, updateDraft } = await import('./storageService.js');
+  const draft = await getDraftById(draftId);
+  if (!draft) throw new Error('Post not found');
+
+  const targetDate = new Date(targetTimeIso);
+  if (isNaN(targetDate.getTime())) throw new Error('Invalid scheduled time');
+
+  const zurichLabel = targetDate.toLocaleString('en-GB', {
+    timeZone: 'Europe/Zurich',
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  });
+
+  const updated = await updateDraft(draftId, {
+    scheduledFor: targetDate.toISOString(),
+    status: 'SCHEDULED',
+    revisionHistory: [
+      ...(draft.revisionHistory || []),
+      {
+        revision: draft.revision || 1,
+        event: 'RESCHEDULED',
+        at: new Date().toISOString(),
+        note: `Rescheduled to ${zurichLabel} (Swiss Time).`,
+        caption: draft.captions?.instagramCaption || '',
+        media: draft.media
+      }
+    ]
+  });
+
+  addLog('info', `[Scheduler] Post ${draftId} rescheduled to ${zurichLabel} (Swiss Time).`);
+  return updated;
 }

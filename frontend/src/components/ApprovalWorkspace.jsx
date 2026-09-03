@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle, CalendarDays, Check, CheckCircle2, ChevronRight, Clock3, Copy,
-  Image as ImageIcon, Layers3, Link, Package, Pencil, Plus, RefreshCw, RotateCcw, Send, X, XCircle
+  Image as ImageIcon, Layers3, Link, Package, Pencil, Plus, RefreshCw, RotateCcw, Send, Trash2, X, XCircle
 } from 'lucide-react';
 import BlotatoPanel from './BlotatoPanel';
 
@@ -118,11 +118,130 @@ function Composer({ media, initial, onSave, onClose, working }) {
     </div></section></div>;
 }
 
+function RescheduleModal({ draft, onClose, onReschedule, working }) {
+  const [selectedDate, setSelectedDate] = useState(() => {
+    if (draft.scheduledFor) {
+      const parts = zonedParts(draft.scheduledFor);
+      return `${parts.year}-${parts.month}-${parts.day}`;
+    }
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    const parts = zonedParts(d.toISOString());
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  });
+  const [selectedSlot, setSelectedSlot] = useState(() => {
+    if (draft.scheduledFor) {
+      const parts = zonedParts(draft.scheduledFor);
+      const curHour = `${parts.hour}:${parts.minute}`;
+      if (['09:00', '14:00', '19:00'].includes(curHour)) return curHour;
+    }
+    return '09:00';
+  });
+
+  const slots = [
+    { time: '09:00', label: '9:00 AM (Matin)', icon: '🌅' },
+    { time: '14:00', label: '2:00 PM (Après-midi)', icon: '🥗' },
+    { time: '19:00', label: '7:00 PM (Soir)', icon: '🏋️' }
+  ];
+
+  const handleConfirm = () => {
+    const combined = `${selectedDate}T${selectedSlot}`;
+    const iso = genevaDateToIso(combined);
+    onReschedule(draft.id, iso);
+  };
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-card" style={{ maxWidth: 460 }}>
+        <div className="card-heading">
+          <div>
+            <p className="eyebrow">SWISS SCHEDULE (EUROPE/ZURICH)</p>
+            <h2 style={{ fontSize: 18, margin: 0 }}>Reschedule Post</h2>
+          </div>
+          <button className="icon-button close" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <div style={{ marginTop: 16 }}>
+          <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 14px' }}>
+            Select the date and one of the 3 daily Swiss slots (Geneva / Zurich Time):
+          </p>
+
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+            Publishing Date
+          </label>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={e => setSelectedDate(e.target.value)}
+            style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid #d1d5db', marginBottom: 16, fontSize: 14 }}
+          />
+
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+            Daily Slot (Swiss Time)
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 18 }}>
+            {slots.map(s => (
+              <button
+                key={s.time}
+                type="button"
+                onClick={() => setSelectedSlot(s.time)}
+                className={`button ${selectedSlot === s.time ? 'dark' : 'ghost'}`}
+                style={{ flexDirection: 'column', padding: '10px 6px', fontSize: 12, textAlign: 'center', height: 'auto', border: selectedSlot === s.time ? '2px solid #000' : '1px solid #e5e7eb' }}
+              >
+                <span style={{ fontSize: 20, marginBottom: 2 }}>{s.icon}</span>
+                <strong>{s.time}</strong>
+                <span style={{ fontSize: 11, opacity: 0.85 }}>{s.label.split(' ')[1]}</span>
+              </button>
+            ))}
+          </div>
+
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#166534', marginBottom: 18 }}>
+            🗓️ Scheduled for: <strong>{selectedDate} at {selectedSlot} (Swiss Time)</strong>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="button ghost" onClick={onClose}>Cancel</button>
+            <button className="button dark" disabled={working || !selectedDate} onClick={handleConfirm}>
+              <CalendarDays size={16} />
+              {working ? 'Saving…' : 'Confirm Schedule'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteConfirmModal({ draft, onClose, onConfirm, working }) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-card" style={{ maxWidth: 420 }}>
+        <div className="card-heading">
+          <h2 style={{ fontSize: 18, margin: 0, color: '#b91c1c' }}>Delete Post?</h2>
+          <button className="icon-button close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <p style={{ color: '#4b5563', fontSize: 13, margin: '14px 0' }}>
+          Are you sure you want to permanently delete <strong>{draft.media?.filename || 'this post'}</strong>? This action cannot be undone.
+        </p>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 }}>
+          <button className="button ghost" onClick={onClose}>Cancel</button>
+          <button className="button danger" disabled={working} onClick={() => onConfirm(draft.id)} style={{ background: '#dc2626', color: '#fff' }}>
+            <Trash2 size={15} />
+            {working ? 'Deleting…' : 'Delete Permanently'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink, onDraftUpdated }) {
   const [filter, setFilter] = useState('ALL');
   const [selectedId, setSelectedId] = useState('');
   const [composer, setComposer] = useState(null);
   const [publisher, setPublisher] = useState(null);
+  const [rescheduling, setRescheduling] = useState(null);
+  const [deleting, setDeleting] = useState(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -131,6 +250,35 @@ function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink, onDr
   const selected = drafts.find(draft => draft.id === selectedId) || filtered[0];
 
   const resetableCount = drafts.filter(d => ['APPROVED', 'SCHEDULED', 'REJECTED', 'PRODUCT_CHANGE_REQUESTED', 'PUBLISH_FAILED'].includes(d.status)).length;
+
+  const handleDelete = async id => {
+    try {
+      const response = await fetch(`/api/drafts/${id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Could not delete the post.');
+      setDeleting(null);
+      if (selectedId === id) setSelectedId('');
+      await refresh('Post permanently deleted.');
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleReschedule = async (id, scheduledFor) => {
+    try {
+      const response = await fetch(`/api/drafts/${id}/reschedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scheduledFor })
+      });
+      if (!response.ok) throw new Error('Could not reschedule the post.');
+      const data = await response.json();
+      setRescheduling(null);
+      if (onDraftUpdated && data.draft) onDraftUpdated(data.draft);
+      await refresh('Post rescheduled successfully (Swiss Time).');
+    } catch (err) {
+      alert(err.message);
+    }
+  };
 
   const create = async data => {
     const response = await fetch('/api/drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
@@ -179,12 +327,116 @@ function OwnerPortal({ drafts, media, refresh, loading, notice, clientLink, onDr
     {notice && <div className="notice success"><CheckCircle2 size={17} />{notice}</div>}
     <section className="stats"><div><Clock3 /><strong>{drafts.filter(d => d.status === 'PENDING_REVIEW').length}</strong><span>Waiting for client</span></div><div><Package /><strong>{drafts.filter(d => d.status === 'PRODUCT_CHANGE_REQUESTED').length}</strong><span>Needs rework</span></div><div><CheckCircle2 /><strong>{drafts.filter(d => d.status === 'APPROVED').length}</strong><span>Approved</span></div><div><XCircle /><strong>{drafts.filter(d => d.status === 'REJECTED').length}</strong><span>Rejected</span></div></section>
     <section className="board"><aside className="post-list"><div className="filter-row">{['ALL', ...Object.keys(STATUS)].map(item => <button className={filter === item ? 'active' : ''} onClick={() => { setFilter(item); setSelectedId(''); }} key={item}>{item === 'ALL' ? 'All' : STATUS[item].label}</button>)}</div>
-      <div className="post-list-scroll">{filtered.map(draft => <button onClick={() => setSelectedId(draft.id)} key={draft.id} className={`post-row ${selected?.id === draft.id ? 'selected' : ''}`}><img src={draft.media?.secure_url} alt="Post thumbnail" /><div><Pill status={draft.status} /><strong>{draft.media?.filename || draft.media?.title || 'Social post'}</strong><small>Revision {draft.revision || 1} · {prettyDate(draft.updatedAt || draft.createdAt)}</small></div><ChevronRight size={17} /></button>)}{!filtered.length && <p className="muted list-empty">No posts here yet.</p>}</div>
+      <div className="post-list-scroll">
+        {filtered.map(draft => (
+          <button onClick={() => setSelectedId(draft.id)} key={draft.id} className={`post-row ${selected?.id === draft.id ? 'selected' : ''}`}>
+            <img src={draft.media?.secure_url} alt="Post thumbnail" />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 3 }}>
+                <Pill status={draft.status} />
+                {draft.scheduledFor && (
+                  <span style={{ fontSize: 10, background: '#e0f2fe', color: '#0369a1', padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>
+                    📅 {prettyDate(draft.scheduledFor).split(' (Geneva)')[0]}
+                  </span>
+                )}
+              </div>
+              <strong>{draft.media?.filename || draft.media?.title || 'Social post'}</strong>
+              <small>Revision {draft.revision || 1} · {prettyDate(draft.updatedAt || draft.createdAt)}</small>
+            </div>
+            <ChevronRight size={17} />
+          </button>
+        ))}
+        {!filtered.length && <p className="muted list-empty">No posts here yet.</p>}
+      </div>
     </aside>
-    {selected ? <section className="detail"><div className="detail-top"><div><p className="eyebrow">REVISION {selected.revision || 1}</p><h2>{selected.media?.filename || 'Social post'}</h2></div><Pill status={selected.status} /></div><div className="detail-grid"><div><div className="image-frame"><img src={selected.media?.secure_url} alt="Selected social post" /></div>{selected.productRequest && <div className="request-box"><Package size={17} /><div><strong>Product change</strong><p>{selected.productRequest}</p></div></div>}</div><div><p className="eyebrow">CAPTION</p><p className="caption-copy">{selected.captions?.instagramCaption}</p><p className="schedule-line"><CalendarDays size={16} /> {selected.scheduledFor ? prettyDate(selected.scheduledFor) : 'Publishing time not set'}</p>{selected.status === 'PRODUCT_CHANGE_REQUESTED' ? <button className="button dark full" onClick={() => setComposer(selected)}><RefreshCw size={16} /> Edit & resubmit</button> : null}{['APPROVED', 'SCHEDULED', 'PUBLISHING', 'PUBLISH_FAILED'].includes(selected.status) ? <button className="button dark full" onClick={() => setPublisher(selected)}><Send size={16} /> {selected.status === 'APPROVED' ? 'Publish with Blotato' : 'Manage Blotato publication'}</button> : null}{selected.status === 'APPROVED' ? <p className="approval-note"><Check size={15} /> Approved by client</p> : null}<History draft={selected} /></div></div></section> : <section className="empty-card"><Layers3 size={35} /><h2>Create your first post</h2><p>Choose an image, add a caption, then send it to the client review page.</p><button className="button dark" onClick={() => setComposer({})}><Plus size={16} /> New post</button></section>}</section>
-    <SiteFooter />
-    {composer && <Composer media={media} initial={composer.id ? composer : null} onClose={() => setComposer(null)} onSave={composer.id ? resubmit : create} working={loading} />}
-    {publisher && <BlotatoPanel draft={publisher} onClose={() => setPublisher(null)} onUpdated={onDraftUpdated} />}
+    {selected ? (
+      <section className="detail">
+        <div className="detail-top">
+          <div>
+            <p className="eyebrow">REVISION {selected.revision || 1}</p>
+            <h2>{selected.media?.filename || 'Social post'}</h2>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Pill status={selected.status} />
+            <button
+              className="button ghost"
+              onClick={() => setDeleting(selected)}
+              title="Delete post"
+              style={{ color: '#dc2626', padding: '6px 12px', fontSize: 12, border: '1px solid #fecaca', display: 'flex', alignItems: 'center', gap: 5 }}
+            >
+              <Trash2 size={14} /> Delete
+            </button>
+          </div>
+        </div>
+        <div className="detail-grid">
+          <div>
+            <div className="image-frame"><img src={selected.media?.secure_url} alt="Selected social post" /></div>
+            {selected.productRequest && (
+              <div className="request-box">
+                <Package size={17} />
+                <div><strong>Product change</strong><p>{selected.productRequest}</p></div>
+              </div>
+            )}
+          </div>
+          <div>
+            {/* Prominent Schedule Banner */}
+            <div style={{ background: selected.scheduledFor ? '#f0f9ff' : '#f9fafb', border: selected.scheduledFor ? '1px solid #bae6fd' : '1px solid #e5e7eb', borderRadius: 8, padding: '12px 14px', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <div>
+                  <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: selected.scheduledFor ? '#0369a1' : '#6b7280', display: 'block' }}>
+                    {selected.scheduledFor ? '🗓️ Scheduled Publishing Time (Swiss Time)' : '🗓️ Not Scheduled'}
+                  </span>
+                  <p style={{ fontSize: 14, fontWeight: 600, color: selected.scheduledFor ? '#0c4a6e' : '#374151', margin: '4px 0 0' }}>
+                    {selected.scheduledFor ? prettyDate(selected.scheduledFor) : 'No time set (Select 9 AM, 2 PM, or 7 PM)'}
+                  </p>
+                </div>
+                <button
+                  className="button ghost"
+                  onClick={() => setRescheduling(selected)}
+                  style={{ fontSize: 12, padding: '6px 12px', background: '#fff', border: '1px solid #cbd5e1', display: 'flex', alignItems: 'center', gap: 5 }}
+                >
+                  <CalendarDays size={14} /> {selected.scheduledFor ? 'Reschedule' : 'Schedule Post'}
+                </button>
+              </div>
+            </div>
+
+            <p className="eyebrow">CAPTION</p>
+            <p className="caption-copy">{selected.captions?.instagramCaption}</p>
+            {selected.status === 'PRODUCT_CHANGE_REQUESTED' ? <button className="button dark full" onClick={() => setComposer(selected)}><RefreshCw size={16} /> Edit & resubmit</button> : null}
+            {['APPROVED', 'SCHEDULED', 'PUBLISHING', 'PUBLISH_FAILED'].includes(selected.status) ? <button className="button dark full" onClick={() => setPublisher(selected)}><Send size={16} /> {selected.status === 'APPROVED' ? 'Publish with Blotato' : 'Manage Blotato publication'}</button> : null}
+            {selected.status === 'APPROVED' ? <p className="approval-note"><Check size={15} /> Approved by client</p> : null}
+            <History draft={selected} />
+          </div>
+        </div>
+      </section>
+    ) : (
+      <section className="empty-card">
+        <Layers3 size={35} />
+        <h2>Create your first post</h2>
+        <p>Choose an image, add a caption, then send it to the client review page.</p>
+        <button className="button dark" onClick={() => setComposer({})}><Plus size={16} /> New post</button>
+      </section>
+    )}
+  </section>
+  <SiteFooter />
+  {composer && <Composer media={media} initial={composer.id ? composer : null} onClose={() => setComposer(null)} onSave={composer.id ? resubmit : create} working={loading} />}
+  {publisher && <BlotatoPanel draft={publisher} onClose={() => setPublisher(null)} onUpdated={onDraftUpdated} />}
+  {rescheduling && (
+    <RescheduleModal
+      draft={rescheduling}
+      onClose={() => setRescheduling(null)}
+      onReschedule={handleReschedule}
+      working={loading}
+    />
+  )}
+  {deleting && (
+    <DeleteConfirmModal
+      draft={deleting}
+      onClose={() => setDeleting(null)}
+      onConfirm={handleDelete}
+      working={loading}
+    />
+  )}
     {showResetConfirm && (
       <div className="modal-backdrop">
         <div className="modal-card" style={{ maxWidth: 440 }}>

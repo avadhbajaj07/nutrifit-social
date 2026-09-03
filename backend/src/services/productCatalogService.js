@@ -9,22 +9,94 @@ const CATALOG_PATH = path.join(__dirname, '../../data/nutrifitness_catalog.json'
 
 let cachedProducts = null;
 
-const CUSTOM_PATHS = [
-  path.join(__dirname, '../../../products.json'),
-  path.join(__dirname, '../../data/products.json'),
-  path.join(__dirname, '../../../products.txt'),
-  path.join(__dirname, '../../data/products.txt')
+const CSV_PATHS = [
+  '/Users/shikha/Downloads/nutrifitness instgram /wc-product-export-2-9-2026-1788288402546.csv',
+  path.join(__dirname, '../../../wc-product-export-2-9-2026-1788288402546.csv'),
+  path.join(__dirname, '../../data/wc-product-export-2-9-2026-1788288402546.csv')
 ];
 
+function parseWooCommerceCSV(content) {
+  const lines = [];
+  let row = [];
+  let inQuotes = false;
+  let cur = '';
+  for (let i = 0; i < content.length; i++) {
+    const c = content[i];
+    const next = content[i+1];
+    if (c === '"' && inQuotes && next === '"') {
+      cur += '"';
+      i++;
+    } else if (c === '"') {
+      inQuotes = !inQuotes;
+    } else if (c === ',' && !inQuotes) {
+      row.push(cur);
+      cur = '';
+    } else if ((c === '\r' || c === '\n') && !inQuotes) {
+      if (c === '\r' && next === '\n') i++;
+      row.push(cur);
+      cur = '';
+      if (row.length > 1 || (row[0] && row[0].trim() !== '')) lines.push(row);
+      row = [];
+    } else {
+      cur += c;
+    }
+  }
+  if (cur || row.length) {
+    row.push(cur);
+    lines.push(row);
+  }
+  if (lines.length < 2) return [];
+
+  const headers = lines[0].map(h => h.trim().replace(/^[\uFEFF"]+|"+$/g, ''));
+  const nameIdx = headers.indexOf('Name');
+  const shortDescIdx = headers.indexOf('Short description');
+  const descIdx = headers.indexOf('Description');
+  const catIdx = headers.indexOf('Categories');
+  const slugIdx = headers.indexOf('Slug');
+
+  const products = [];
+  for (let i = 1; i < lines.length; i++) {
+    const r = lines[i];
+    const name = (r[nameIdx] || '').trim();
+    if (!name) continue;
+    products.push({
+      id: name,
+      name,
+      slug: (r[slugIdx] || name).toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      short_description: (r[shortDescIdx] || '').trim(),
+      description: (r[descIdx] || '').trim(),
+      categories: (r[catIdx] || '').split(',').map(c => c.trim()).filter(Boolean)
+    });
+  }
+  return products;
+}
+
 /**
- * Loads products from user custom file (highest priority), local JSON cache, or WooCommerce API
+ * Loads products from WooCommerce CSV (highest priority), user custom file, local JSON cache, or WooCommerce API
  */
 export async function getProductCatalog() {
   if (cachedProducts && cachedProducts.length > 0) {
     return cachedProducts;
   }
 
-  // 1. Highest priority: User-provided custom products file
+  // 1. Highest priority: WooCommerce Product Export CSV
+  for (const csvPath of CSV_PATHS) {
+    if (fs.existsSync(csvPath)) {
+      try {
+        const raw = fs.readFileSync(csvPath, 'utf8');
+        const parsed = parseWooCommerceCSV(raw);
+        if (parsed.length > 0) {
+          cachedProducts = parsed;
+          addLog('info', `Loaded ${cachedProducts.length} official products from WooCommerce CSV (${path.basename(csvPath)})`);
+          return cachedProducts;
+        }
+      } catch (err) {
+        console.warn('Error reading WooCommerce CSV:', err.message);
+      }
+    }
+  }
+
+  // 2. User-provided custom products file
   for (const customPath of CUSTOM_PATHS) {
     if (fs.existsSync(customPath)) {
       try {
@@ -151,26 +223,48 @@ export async function matchProductForMedia(media, index = 0) {
   const catalog = await getProductCatalog();
   if (!catalog || catalog.length === 0) return null;
 
-  const searchText = `${media?.filename || ''} ${media?.public_id || ''} ${media?.title || ''}`.toLowerCase();
+  const rawFilename = (media?.filename || media?.title || media?.public_id || '')
+    .replace(/\s*-\s*\d+\.(png|jpe?g|webp)$/i, '')
+    .replace(/\.[^/.]+$/, '')
+    .trim();
 
-  // 1. Try keyword rules
+  const normalize = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+  const normSearch = normalize(rawFilename);
+
+  // 1. Direct exact or strong substring match in catalog
+  for (const product of catalog) {
+    const normName = normalize(product.name);
+    if (normName === normSearch || normSearch.includes(normName) || (normSearch.length > 6 && normName.includes(normSearch))) {
+      return product;
+    }
+  }
+
+  // 2. Token overlap match
+  const tokens = rawFilename.toLowerCase().split(/[\s,–-]+/).filter(t => t.length > 2);
+  let bestProduct = null;
+  let maxTokens = 0;
+  for (const product of catalog) {
+    const pLower = product.name.toLowerCase();
+    const count = tokens.filter(t => pLower.includes(t)).length;
+    if (count > maxTokens) {
+      maxTokens = count;
+      bestProduct = product;
+    }
+  }
+  if (bestProduct && maxTokens >= Math.min(2, tokens.length)) {
+    return bestProduct;
+  }
+
+  // 3. Keyword rules fallback
+  const fullSearch = `${media?.filename || ''} ${media?.public_id || ''} ${media?.title || ''}`.toLowerCase();
   for (const mapping of KEYWORD_MAPPINGS) {
-    if (mapping.keywords.some(kw => searchText.includes(kw))) {
+    if (mapping.keywords.some(kw => fullSearch.includes(kw))) {
       const match = catalog.find(p => p.name.toUpperCase().includes(mapping.query.toUpperCase()));
       if (match) return match;
     }
   }
 
-  // 2. Try direct product name in filename
-  for (const product of catalog) {
-    const cleanName = product.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const cleanSearch = searchText.replace(/[^a-z0-9]/g, '');
-    if (cleanSearch.includes(cleanName) && cleanName.length > 3) {
-      return product;
-    }
-  }
-
-  // 3. Fallback: Curated high-converting bestsellers on nutrifitness.ch in round-robin order
+  // 4. Fallback: Curated high-converting bestsellers on nutrifitness.ch in round-robin order
   const bestSellerSlugs = [
     'caffeine-200mg-60-tabs',
     'ghost-whey-918g',
@@ -201,23 +295,53 @@ export async function matchProductForMedia(media, index = 0) {
 export function generateCaptionFromProduct(product, options = {}) {
   const name = product.name;
   const price = product.price ? `(${product.price})` : '';
-  const shortDesc = product.short_description || '';
-  const fullDesc = product.description || '';
+  const normName = (name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const stripHtml = s => (s || '').replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&').replace(/&#8217;/g, "'").replace(/&nbsp;/g, ' ').replace(/\\n/g, ' ').replace(/\s+/g, ' ').trim();
+  const shortDesc = stripHtml(product.short_description || '');
+  const fullDesc = stripHtml(product.description || '');
 
   // Extract clean bullet points from description
-  const bulletLines = shortDesc
-    .split(/✅|✔|•|\n/)
-    .map(s => s.trim())
-    .filter(s => s.length > 5 && !s.toLowerCase().includes('http'));
+  const excludedPhrases = [
+    'conseil', 'utilisation', 'avertissement', 'recommandé',
+    'dépasser', 'portée', 'enfant', 'substitut', 'varié', 'équilibré', 'consommer de préférence', 'verre d\'eau'
+  ];
 
-  const benefits = bulletLines.slice(0, 4);
+  const rawText = (shortDesc && shortDesc.length > 25) ? shortDesc : fullDesc;
+  const bulletLines = rawText
+    .split(/✅|✔|•|\. |▪|▫/)
+    .map(s => s.trim().replace(/^[-–—]\s*/, ''))
+    .filter(s => {
+      const lower = s.toLowerCase();
+      return s.length >= 8 && s.length <= 95 &&
+        !lower.includes('http') &&
+        !lower.includes('chf') &&
+        !excludedPhrases.some(p => lower.includes(p));
+    });
+
+  let benefits = bulletLines.slice(0, 4);
+  if (benefits.length < 2) {
+    if (normName.includes('magnesium')) {
+      benefits = [
+        'Haute biodisponibilité et absorption supérieure (Bisglycinate)',
+        'Contribue à réduire la fatigue et prévient les crampes',
+        'Soutient le fonctionnement normal du système nerveux et musculaire',
+        'Idéal pour sportifs réguliers et récupération nocturne'
+      ];
+    } else {
+      benefits = [
+        'Formule premium de haute qualité et pureté certifiée',
+        'Excellente digestibilité et assimilation rapide',
+        'Idéal pour soutenir la performance et la récupération'
+      ];
+    }
+  }
 
   // Determine post theme based on categories or name
   let theme = 'motivation';
-  const nameLower = name.toLowerCase();
-  if (nameLower.includes('whey') || nameLower.includes('protein') || nameLower.includes('iso') || nameLower.includes('mass') || nameLower.includes('avoine') || nameLower.includes('snack') || nameLower.includes('cookie') || nameLower.includes('butter')) {
+
+  if (normName.includes('whey') || normName.includes('protein') || normName.includes('iso') || normName.includes('mass') || normName.includes('gainer') || normName.includes('avoine') || normName.includes('snack') || normName.includes('cookie') || normName.includes('butter') || normName.includes('peanut') || normName.includes('cacahuete')) {
     theme = 'nutrition';
-  } else if (nameLower.includes('caffeine') || nameLower.includes('creatine') || nameLower.includes('ghost') || nameLower.includes('pre-workout') || nameLower.includes('eaa') || nameLower.includes('bcaa') || nameLower.includes('burn')) {
+  } else if (normName.includes('caffeine') || normName.includes('cafeine') || normName.includes('creatine') || normName.includes('creapure') || normName.includes('ghost') || normName.includes('pre-workout') || normName.includes('preworkout') || normName.includes('abe') || normName.includes('infected') || normName.includes('eaa') || normName.includes('bcaa') || normName.includes('burn') || normName.includes('citrulline') || normName.includes('beta-alanine')) {
     theme = 'workout';
   }
 
@@ -239,17 +363,39 @@ export function generateCaptionFromProduct(product, options = {}) {
 
   // Usage guidance based on product
   let advice = "Prends 1 dose selon tes besoins pour des résultats optimaux.";
-  if (nameLower.includes('caffeine') || nameLower.includes('pre-workout') || nameLower.includes('ghost') || nameLower.includes('blast')) {
-    advice = "Consomme 1 dose 20 à 30 minutes avant ta séance pour un boost d'énergie et une concentration maximale.";
-  } else if (nameLower.includes('whey') || nameLower.includes('iso') || nameLower.includes('protein')) {
+  if (normName.includes('whey') || normName.includes('iso') || normName.includes('protein')) {
     advice = "Consomme 1 shaker immédiatement après l'entraînement ou en collation pour soutenir ta masse musculaire.";
-  } else if (nameLower.includes('creatine') || nameLower.includes('creapure')) {
+  } else if (normName.includes('mass') || normName.includes('gainer')) {
+    advice = "Prends 1 dose en collation ou après l'entraînement pour maximiser ta prise de masse.";
+  } else if (normName.includes('creatine') || normName.includes('creapure')) {
     advice = "Prends 3 à 5g par jour avec de l'eau ou ton shaker pour maximiser ta force et ta récupération.";
-  } else if (nameLower.includes('glycine') || nameLower.includes('magnesium') || nameLower.includes('sommeil')) {
+  } else if (normName.includes('caffeine') || normName.includes('cafeine') || normName.includes('pre-workout') || normName.includes('preworkout') || normName.includes('abe') || normName.includes('infected') || normName.includes('blast') || normName.includes('citrulline') || normName.includes('beta-alanine') || (normName.includes('ghost') && !normName.includes('whey'))) {
+    advice = "Consomme 1 dose 20 à 30 minutes avant ta séance pour un boost d'énergie et une concentration maximale.";
+  } else if (normName.includes('glycine') || normName.includes('magnesium') || normName.includes('ashwagandha') || normName.includes('sommeil')) {
     advice = "Prends ta dose environ 30 minutes avant le coucher pour un sommeil profond et réparateur.";
-  } else if (nameLower.includes('fat burn') || nameLower.includes('burn')) {
+  } else if (normName.includes('fat burn') || normName.includes('burn') || normName.includes('carnitine')) {
     advice = "Prends ta dose le matin ou avant ta séance pour stimuler ton métabolisme.";
+  } else if (normName.includes('peanut') || normName.includes('cacahuete')) {
+    advice = "À déguster en tartine, dans vos porridges ou avant votre entraînement pour un plein d'énergie saine.";
   }
+
+  // Dynamic product-specific hashtag (always exactly 5 hashtags total)
+  let productHashtag = '#musculation';
+  if (normName.includes('creatine') || normName.includes('creapure')) productHashtag = '#creatine';
+  else if (normName.includes('whey') || normName.includes('iso')) productHashtag = '#wheyisolate';
+  else if (normName.includes('mass') || normName.includes('gainer')) productHashtag = '#massgainer';
+  else if (normName.includes('pre-workout') || normName.includes('preworkout') || normName.includes('abe') || normName.includes('infected')) productHashtag = '#preworkout';
+  else if (normName.includes('caffeine') || normName.includes('cafeine')) productHashtag = '#energie';
+  else if (normName.includes('ashwagandha')) productHashtag = '#ashwagandha';
+  else if (normName.includes('peanut') || normName.includes('cacahuete')) productHashtag = '#peanutbutter';
+  else if (normName.includes('fat burn') || normName.includes('burn') || normName.includes('carnitine')) productHashtag = '#bruleurdegraisse';
+  else if (normName.includes('glycine') || normName.includes('sommeil')) productHashtag = '#recuperation';
+  else if (normName.includes('magnesium') || normName.includes('zinc')) productHashtag = '#santeactive';
+  else if (normName.includes('omega')) productHashtag = '#omega3';
+  else if (normName.includes('collagene')) productHashtag = '#collagene';
+  else if (normName.includes('shaker')) productHashtag = '#fitnesslifestyle';
+
+  const fiveHashtags = `#fitnesssuisse #suisseromande ${productHashtag} #nutrifitness #musculationsuisse`;
 
   // Construct final Instagram caption (No prices, clean Swiss link CTA, exactly 5 hashtags)
   const instagramCaption = `${hook}
@@ -262,10 +408,10 @@ ${advice}
 
 🇨🇭 Disponible dès maintenant sur nutrifitness.ch (lien direct en bio).
 
-#fitnesssuisse #suisseromande #nutrifitness #genevefitness #lausannefit`;
+${fiveHashtags}`;
 
   const pinterestTitle = `${name} | NutriFitness Suisse 🇨🇭`;
-  const pinterestDescription = `${name} disponible sur nutrifitness.ch. ${shortDesc.slice(0, 200)} Conseils sport & nutrition.`;
+  const pinterestDescription = `${name} disponible sur nutrifitness.ch. ${shortDesc.slice(0, 200)} Conseils sport & nutrition en Suisse romande.`;
 
   return {
     theme,

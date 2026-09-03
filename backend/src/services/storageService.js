@@ -43,9 +43,9 @@ const DEFAULT_DATA = {
       requireClientApproval: true,
       timezone: process.env.APP_TIMEZONE || 'Europe/Zurich',
       slots: [
-        { id: 'slot-morning', label: 'Matin (Motivation & Réveil)', time: '08:30', cron: '30 8 * * *', theme: 'motivation' },
-        { id: 'slot-lunch', label: 'Midi (Nutrition & Recette Saine)', time: '12:30', cron: '30 12 * * *', theme: 'nutrition' },
-        { id: 'slot-evening', label: 'Soir (Workout & Engagement)', time: '18:30', cron: '30 18 * * *', theme: 'workout' }
+        { id: 'slot-morning', label: 'Matin (Motivation & Réveil)', time: '09:00', cron: '0 9 * * *', theme: 'motivation' },
+        { id: 'slot-lunch', label: 'Midi (Nutrition & Énergie)', time: '14:00', cron: '0 14 * * *', theme: 'nutrition' },
+        { id: 'slot-evening', label: 'Soir (Workout & Récupération)', time: '19:00', cron: '0 19 * * *', theme: 'workout' }
       ],
       autoDeleteMediaOnSuccess: false,
       postToInstagram: true,

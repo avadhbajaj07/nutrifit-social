@@ -157,8 +157,17 @@ router.post('/:id/client-response', requireClientPortalAccess, (req, res) => {
       });
     } else return res.status(400).json({ error: 'Unknown review action.' });
 
-    const draft = await updateDraft(current.id, updates);
+    let draft = await updateDraft(current.id, updates);
     addLog('info', `Client review for ${current.id}: ${action}.`);
+
+    if (action === 'approve' || action === 'caption_approve') {
+      try {
+        const scheduled = await assignScheduledSlot(current.id);
+        if (scheduled) draft = scheduled;
+      } catch (err) {
+        console.warn(`[Scheduler] Could not auto-schedule draft ${current.id}:`, err.message);
+      }
+    }
 
     res.json({ success: true, draft });
   }).catch(error => res.status(500).json({ error: error.message }));
@@ -252,8 +261,26 @@ router.get('/:id/blotato-publication', requireAdmin, async (req, res) => {
   } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
 });
 
+router.post('/:id/reschedule', requireAdmin, async (req, res) => {
+  try {
+    const { scheduledFor } = req.body;
+    if (!scheduledFor) return res.status(400).json({ error: 'scheduledFor date is required' });
+    const { rescheduleDraft } = await import('../services/schedulerService.js');
+    const updated = await rescheduleDraft(req.params.id, scheduledFor);
+    res.json({ success: true, draft: updated });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.delete('/:id', requireAdmin, async (req, res) => {
-  try { await deleteDraft(req.params.id); res.json({ success: true }); } catch (error) { res.status(500).json({ error: error.message }); }
+  try {
+    await deleteDraft(req.params.id);
+    addLog('info', `Draft ${req.params.id} permanently deleted.`);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 export default router;

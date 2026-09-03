@@ -1,12 +1,12 @@
 import { listMediaFromFolder } from './cloudinaryService.js';
 import { generateViralPostContent } from './aiCaptionService.js';
 import { matchProductForMedia, generateCaptionFromProduct } from './productCatalogService.js';
-import { addLog, createDraft, getDrafts, updateDraft } from './storageService.js';
+import { addLog, createDraft, getDrafts, updateDraft, deleteDraft } from './storageService.js';
 
 const BATCH_SLOTS = [
-  { theme: 'motivation', time: '08:30' },
-  { theme: 'nutrition', time: '12:30' },
-  { theme: 'workout', time: '18:30' }
+  { theme: 'motivation', time: '09:00' },
+  { theme: 'nutrition', time: '14:00' },
+  { theme: 'workout', time: '19:00' }
 ];
 
 const pendingDrafts = drafts => drafts
@@ -27,9 +27,21 @@ export async function syncCloudinaryToDrafts() {
     return { newCount: 0, totalDrafts: drafts.length, message: 'No media found in Cloudinary folder' };
   }
 
+  // Purge any stale drafts whose image was deleted from Cloudinary
+  const currentPublicIds = new Set(allMedia.map(m => m.public_id).filter(Boolean));
+  for (const draft of drafts) {
+    if (draft.media?.public_id && !currentPublicIds.has(draft.media.public_id)) {
+      try {
+        await deleteDraft(draft.id);
+        console.log(`[Sync] Purged stale draft ${draft.id} (${draft.media.public_id})`);
+      } catch (err) {}
+    }
+  }
+
   // Set of existing media public_ids already in the database
-  const usedPublicIds = new Set(drafts.map(d => d.media?.public_id).filter(Boolean));
-  const usedUrls = new Set(drafts.map(d => d.media?.secure_url).filter(Boolean));
+  const refreshedDrafts = await getDrafts();
+  const usedPublicIds = new Set(refreshedDrafts.map(d => d.media?.public_id).filter(Boolean));
+  const usedUrls = new Set(refreshedDrafts.map(d => d.media?.secure_url).filter(Boolean));
 
   const newMediaList = allMedia.filter(m =>
     m.public_id &&
@@ -40,22 +52,18 @@ export async function syncCloudinaryToDrafts() {
   let newCount = 0;
   for (const [index, media] of newMediaList.entries()) {
     const slot = BATCH_SLOTS[index % BATCH_SLOTS.length];
-    const content = await generateViralPostContent({
-      theme: slot.theme,
-      mediaTitle: media.filename || media.public_id,
-      media,
-      index
-    });
+    const product = await matchProductForMedia(media, index);
+    const captionResult = generateCaptionFromProduct(product || { name: media.filename || media.public_id });
 
     try {
       await createDraft({
-        theme: content.theme || slot.theme,
+        theme: captionResult.theme || slot.theme,
         slotTime: slot.time,
         media,
         captions: {
-          instagramCaption: content.instagramCaption,
-          pinterestTitle: content.pinterestTitle,
-          pinterestDescription: content.pinterestDescription
+          instagramCaption: captionResult.instagramCaption,
+          pinterestTitle: captionResult.pinterestTitle,
+          pinterestDescription: captionResult.pinterestDescription
         }
       });
       newCount++;
@@ -124,7 +132,7 @@ export async function rewriteAllCaptions() {
 export async function ensureClientReviewBatch() {
   const drafts = await getDrafts();
   return drafts
-    .filter(draft => draft.status === 'PENDING_REVIEW')
+    .filter(draft => draft.status === 'PENDING_REVIEW' && !draft.media?.public_id?.startsWith('nutrifit_') && draft.media?.public_id !== 'nutrifitA12')
     .slice(0, 3);
 }
 
