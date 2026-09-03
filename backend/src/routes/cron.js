@@ -203,5 +203,28 @@ Idéal au réveil ou après ta séance pour un apport immédiat en acides aminé
   }
 });
 
+/**
+ * Clears all drafts completely from the review board
+ */
+router.post('/clear-all', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  if (secret) {
+    const auth = req.headers.authorization;
+    if (auth !== `Bearer ${secret}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
+
+  try {
+    const { deleteAllDrafts, addLog } = await import('../services/storageService.js');
+    const count = await deleteAllDrafts();
+    addLog('info', `[ClearAll] Deleted all ${count} drafts from review board.`);
+    res.json({ success: true, count, message: `Successfully deleted all ${count} drafts.` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
+
 
