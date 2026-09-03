@@ -206,7 +206,8 @@ const KEYWORD_MAPPINGS = [
   { keywords: ['fatburn', 'fat-burn', 'bruleur', 'thermo', 'burn'], query: 'FAT BURN 60 CAPS' },
   { keywords: ['ashwagandha', 'ksm66', 'ksm-66', 'stress'], query: 'Ashwagandha KSM-66® 600mg' },
   { keywords: ['avoine', 'oat', 'flocons', 'farine'], query: "FARINE D'AVOINE 1KG" },
-  { keywords: ['glycine', 'sommeil', 'recuperation', 'collagene'], query: 'GLYCINE 300G' },
+  { keywords: ['glycine', 'sommeil', 'recuperation'], query: 'GLYCINE 300G' },
+  { keywords: ['collagene', 'collagen'], query: 'POUDRE DE COLLAGENE MIX GOÛT MANGUE 300G' },
   { keywords: ['zinc', 'immunite'], query: 'ZINC BISGLYCINATE 160 CAPS' },
   { keywords: ['magnesium', 'bisglycinate', 'crampes'], query: 'MAGNÉSIUM BISGLYCINATE 60 TABS' },
   { keywords: ['bcaa', 'amino', 'eaa'], query: 'BM EAA 300G' },
@@ -224,7 +225,10 @@ export async function matchProductForMedia(media, index = 0) {
   if (!catalog || catalog.length === 0) return null;
 
   const rawFilename = (media?.filename || media?.title || media?.public_id || '')
+    .replace(/^nutrifitness\//i, '')
     .replace(/\s*-\s*\d+\.(png|jpe?g|webp)$/i, '')
+    .replace(/_-_0\d+$/i, '')
+    .replace(/_0\d+$/i, '')
     .replace(/\.[^/.]+$/, '')
     .trim();
 
@@ -239,21 +243,32 @@ export async function matchProductForMedia(media, index = 0) {
     }
   }
 
-  // 2. Token overlap match
-  const tokens = rawFilename.toLowerCase().split(/[\s,–-]+/).filter(t => t.length > 2);
+  // 2. Token overlap match (split on underscores, hyphens, and spaces)
+  const cleanTokens = rawFilename
+    .toLowerCase()
+    .replace(/prot_?ine/g, 'proteine')
+    .split(/[\s,–_\-]+/)
+    .filter(t => t.length > 2 && !['01', '02', '03', 'jpg', 'png', 'jpeg', 'webp'].includes(t));
+
   let bestProduct = null;
   let maxTokens = 0;
   for (const product of catalog) {
-    const pLower = product.name.toLowerCase();
-    const count = tokens.filter(t => pLower.includes(t)).length;
-    if (count > maxTokens) {
-      maxTokens = count;
+    const pNorm = normalize(product.name);
+    let matchScore = 0;
+    for (const t of cleanTokens) {
+      if (pNorm.includes(normalize(t))) {
+        matchScore += t.length > 3 ? 2 : 1;
+      }
+    }
+    if (matchScore > maxTokens) {
+      maxTokens = matchScore;
       bestProduct = product;
     }
   }
-  if (bestProduct && maxTokens >= Math.min(2, tokens.length)) {
+  if (bestProduct && maxTokens >= 3) {
     return bestProduct;
   }
+
 
   // 3. Keyword rules fallback
   const fullSearch = `${media?.filename || ''} ${media?.public_id || ''} ${media?.title || ''}`.toLowerCase();
@@ -319,7 +334,14 @@ export function generateCaptionFromProduct(product, options = {}) {
     });
 
   let benefits = bulletLines.slice(0, 4);
-  if (benefits.length < 2) {
+  if (normName.includes('beebad')) {
+    benefits = [
+      'Boisson énergisante naturelle enrichie à 13.8% de miel pur',
+      'Maca des Andes & Ginseng pour une vitalité saine et durable',
+      'Propolis & Gelée Royale pour soutenir l\'immunité naturelle',
+      'Caféine & Vitamines B pour un boost d\'énergie sans crash'
+    ];
+  } else if (benefits.length < 2) {
     if (normName.includes('magnesium')) {
       benefits = [
         'Haute biodisponibilité et absorption supérieure (Bisglycinate)',
@@ -341,7 +363,7 @@ export function generateCaptionFromProduct(product, options = {}) {
 
   if (normName.includes('whey') || normName.includes('protein') || normName.includes('iso') || normName.includes('mass') || normName.includes('gainer') || normName.includes('avoine') || normName.includes('snack') || normName.includes('cookie') || normName.includes('butter') || normName.includes('peanut') || normName.includes('cacahuete')) {
     theme = 'nutrition';
-  } else if (normName.includes('caffeine') || normName.includes('cafeine') || normName.includes('creatine') || normName.includes('creapure') || normName.includes('ghost') || normName.includes('pre-workout') || normName.includes('preworkout') || normName.includes('abe') || normName.includes('infected') || normName.includes('eaa') || normName.includes('bcaa') || normName.includes('burn') || normName.includes('citrulline') || normName.includes('beta-alanine')) {
+  } else if (normName.includes('caffeine') || normName.includes('cafeine') || normName.includes('creatine') || normName.includes('creapure') || normName.includes('ghost') || normName.includes('pre-workout') || normName.includes('preworkout') || normName.includes('abe') || normName.includes('beebad') || normName.includes('infected') || normName.includes('eaa') || normName.includes('bcaa') || normName.includes('burn') || normName.includes('citrulline') || normName.includes('beta-alanine')) {
     theme = 'workout';
   }
 
@@ -369,6 +391,8 @@ export function generateCaptionFromProduct(product, options = {}) {
     advice = "Prends 1 dose en collation ou après l'entraînement pour maximiser ta prise de masse.";
   } else if (normName.includes('creatine') || normName.includes('creapure')) {
     advice = "Prends 3 à 5g par jour avec de l'eau ou ton shaker pour maximiser ta force et ta récupération.";
+  } else if (normName.includes('beebad')) {
+    advice = "Déguste ta canette bien fraîche 20 minutes avant l'effort ou lors d'un coup de fatigue dans la journée.";
   } else if (normName.includes('caffeine') || normName.includes('cafeine') || normName.includes('pre-workout') || normName.includes('preworkout') || normName.includes('abe') || normName.includes('infected') || normName.includes('blast') || normName.includes('citrulline') || normName.includes('beta-alanine') || (normName.includes('ghost') && !normName.includes('whey'))) {
     advice = "Consomme 1 dose 20 à 30 minutes avant ta séance pour un boost d'énergie et une concentration maximale.";
   } else if (normName.includes('glycine') || normName.includes('magnesium') || normName.includes('ashwagandha') || normName.includes('sommeil')) {
@@ -385,6 +409,7 @@ export function generateCaptionFromProduct(product, options = {}) {
   else if (normName.includes('whey') || normName.includes('iso')) productHashtag = '#wheyisolate';
   else if (normName.includes('mass') || normName.includes('gainer')) productHashtag = '#massgainer';
   else if (normName.includes('pre-workout') || normName.includes('preworkout') || normName.includes('abe') || normName.includes('infected')) productHashtag = '#preworkout';
+  else if (normName.includes('beebad')) productHashtag = '#energydrink';
   else if (normName.includes('caffeine') || normName.includes('cafeine')) productHashtag = '#energie';
   else if (normName.includes('ashwagandha')) productHashtag = '#ashwagandha';
   else if (normName.includes('peanut') || normName.includes('cacahuete')) productHashtag = '#peanutbutter';
